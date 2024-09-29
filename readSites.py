@@ -29,7 +29,7 @@ def login(id, pw):
 
   return browser
 #while (True):
-for j in range(2):
+for j in range(4):
   origin_df = pd.read_csv('crawl.csv', encoding='utf-8')
 
   browser = login("ipindong", "Jet2033050!")
