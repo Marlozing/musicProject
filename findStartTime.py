@@ -3,6 +3,7 @@ import ray
 import librosa
 from sklearn.model_selection import ParameterGrid
 
+ray.init(object_store_memory=4 * 1024 * 1024 * 1024,dashboard_port=None)
 
 # HyperDTW 구현
 def hyper_dtw(mfcc_1, mfcc_2, param_grid):
@@ -36,19 +37,18 @@ def compute_dtw(mfcc_1, mfcc_2_slice):
     return distance[-1, -1]  # 최종 거리 반환
 
 
-def find_time(audio_a, audio_b):
-    # 사용 예시
+def find_time(audio1, audio2):
     param_grid = {
 
     }
     sr = 44100
 
-    compiled_audio_a = audio_a[:20 * sr] / np.max(np.abs(audio_a))
-    compiled_audio_b = audio_b[:2 * 60 * sr] / np.max(np.abs(audio_b))
+    compiled_audio1 = audio1[:20 * sr] / np.max(np.abs(audio1))
+    compiled_audio2 = audio2[:2 * 60 * sr] / np.max(np.abs(audio2))
 
     # MFCC 특징 추출
-    mfcc_1 = librosa.feature.mfcc(y=compiled_audio_a, sr=sr, n_mfcc=13)
-    mfcc_2 = librosa.feature.mfcc(y=compiled_audio_b, sr=sr, n_mfcc=13)
+    mfcc_1 = librosa.feature.mfcc(y=compiled_audio1, sr=sr, n_mfcc=13)
+    mfcc_2 = librosa.feature.mfcc(y=compiled_audio2, sr=sr, n_mfcc=13)
     best_index = hyper_dtw(mfcc_1, mfcc_2, param_grid)
 
     return best_index
@@ -56,6 +56,6 @@ def find_time(audio_a, audio_b):
 
 if __name__ == '__main__':
     y_1, _ = librosa.load('audio/원본.wav', sr=None)
-    y_2, _ = librosa.load('audio/[징버거].wav', sr=None)
+    y_2, _ = librosa.load('audio/[아이네].wav', sr=None)
 
-    print(find_time(y_1, y_2))
+    print(find_time(y_1, y_2) * 512)
