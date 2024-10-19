@@ -49,7 +49,7 @@ class DownloadAudio:
           title_list = article_title.split("] ")
           article_title = title_list[-1].replace(" 반응정리", "")
 
-          '''파일로 저장'''
+          #파일로 저장
           f = open('crawl.csv', 'a+', newline='', encoding="utf-8")
           wr = csv.writer(f)
 
@@ -102,18 +102,18 @@ class DownloadAudio:
     if self.url is None:
       return
 
-    '''진행바 설정'''
+    #진행바 설정
     root = tk.Tk()
     root.title("다운로드 진행바")
-    root.geometry("400x100")
+    root.geometry("400x80")
 
-    bar = ttk.Progressbar(root, length=1, mode='determinate')
+    bar = ttk.Progressbar(root, length=360, mode='determinate')
     bar.pack(pady=20)
-    bar["maximum"] = 1
+    bar["maximum"] = 300
     bar["value"] = 0
     root.update()
 
-    '''기존 파일 삭제'''
+    #기존 파일 삭제
     clear_folder('./video')
     clear_folder('./audio')
 
@@ -126,20 +126,20 @@ class DownloadAudio:
     soup = bs(browser.page_source, 'html.parser')
     datas = soup.find_all(class_='se-component se-oembed se-l-default __se-component')
 
-    '''유튜브 링크 가져오기'''
+    #유튜브 링크 가져오기
     for data in datas:
       data = data.find_all_next(class_='__se_module_data')[0]
-      youtube_link = str(data).split("src=")[1].split('"')[1].replace("\\","")
-      watch_url = change_to_youtube_url(youtube_link)
+      watch_url = change_to_youtube_url(data)
       youtube_links.append(watch_url)
 
-    browser.quit()  # 브라우저 종료
+    browser.quit()
 
-    '''진행바 길이 설정'''
+    #진행바 길이 설정
     total_links = len(youtube_links) * 2
     bar["maximum"] = total_links
+    root.update()
 
-    '''유튜브 영상 다운로드'''
+    #유튜브 영상 다운로드
     for link in youtube_links:
       yt = YouTube(link)
       title = get_viewer(yt.author, yt.title)
@@ -150,20 +150,18 @@ class DownloadAudio:
       audio_clip = AudioFileClip(mp4_path)
       audio_clip.write_audiofile("audio/"+title+".wav",verbose=False, logger=None)
 
-      '''프로그래스 바 업데이트'''
+      #프로그래스 바 업데이트
       bar["value"] += 1
       root.update()
 
-    '''오디오 시작 시간 조정'''
+    #오디오 시작 시간 조정
     origin, sr = librosa.load("./audio/원본.wav", sr=None)
 
     for filename in os.listdir('./audio'):
       if filename != "원본.wav":
         y, _ = librosa.load("./audio/"+filename,sr=sr)
         start_index = find_time(origin, y) * 512
-        print(start_index, filename)
         if start_index == 0:
-          print(filename, np.argmax(np.abs(origin) > 0.02))
           y = np.pad(y, (np.argmax(np.abs(origin) > 0.02), 0), 'constant')
           soundfile.write("./audio/"+filename, y,sr)
         else:
