@@ -3,10 +3,73 @@ import csv
 import librosa
 import tkinter as tk
 import numpy as np
+import soundfile
+import os
 
+from pytubefix import YouTube
+from moviepy.editor import AudioFileClip
+from tkinter import ttk
+from tkinter import messagebox as msgbox
 from bs4 import BeautifulSoup as bs
 
-from functions import login
+from Functions import login
+from FindStartTime import find_time
+
+def clear_folder(path):
+  """
+  폴더를 정리하는 함수
+  지정된 경로의 폴더가 없으면 생성하고,
+  존재하는 경우 모든 파일을 삭제합니다.
+  """
+  if not os.path.exists(path):
+    os.makedirs(path)  # 폴더가 없으면 생성
+    return
+  for filename in os.listdir(path):
+    file_path = os.path.join(path, filename)
+    if os.path.isfile(file_path):
+      os.remove(file_path)  # 파일 삭제
+
+
+def change_to_youtube_url(source):
+  """
+  임베디드 링크에서 유튜브 URL로 변환
+  주어진 oembed 링크에서 비디오 ID를 추출하여
+  실행 가능한 유튜브 주소를 반환합니다.
+  """
+  video_id = str(source).split("src=")[1].split('"')[1].replace("\\", "").split("/")[-1].split("?")[0]  # 비디오 ID 추출
+  return f"https://www.youtube.com/watch?v={video_id}"  # 유튜브 URL 반환
+
+
+def get_viewer(author, title):
+  """
+  작성자 및 제목에 따라 WAV 파일 경로 결정
+  주어진 작성자와 제목을 기반으로 WAV 파일의 경로를 결정합니다.
+  """
+  names = ["우왁굳", "아이네", "징버거", "릴파", "주르르", "고세구", "비챤", "뢴트게늄"]
+  authors = {
+    "우왁굳의 반찬가게": "[우왁굳]",
+    "데친 숙주나물": "[아이네]",
+    "징버거가 ZZANG센 주제에 너무 신중하다": "[징버거]",
+    "릴파의 순간들": "[릴파]",
+    "주르르": "[주르르]",
+    "고세구의 짧은거": "[고세구]",
+    "비챤의 나랑놀아": "[비챤]",
+    "하치키타치": "[뢴트게늄]"
+  }
+  wav_path = "원본"  # 기본 경로
+
+  # 작성자가 "반응정리"인 경우
+  if author == "반응정리":
+    for name in names:
+      if name in title.split(" ")[0]:  # 제목의 첫 단어와 비교
+        wav_path = title.split(" ")[0]  # 첫 단어를 경로로 설정
+
+  # 작성자에 따른 경로 설정
+  if author in authors:
+    wav_path = authors[author]
+
+  return wav_path  # 최종 경로 반환
+
 
 class DownloadAudio:
   def __init__(self, id, pw):
@@ -14,17 +77,15 @@ class DownloadAudio:
     self.pw = pw
     self.url = None
 
-  def read_cafe(self, length=1):
 
+  def read_cafe(self, length=1):
     total_list = ["제목", "링크"]
 
-    f = open('crawl.csv', 'w', encoding="utf-8", newline='')
-    wr = csv.writer(f)
-    wr.writerow([total_list[0], total_list[1]])
-    f.close()
+    with open('../datas/crawl.csv', 'w', encoding="utf-8", newline='') as f:
+      wr = csv.writer(f)
+      wr.writerow([total_list[0], total_list[1]])
 
     for i in range(1, length + 1):
-
       browser = login(self.id, self.pw)
 
       # 크롤링 하고자하는 url
@@ -50,11 +111,10 @@ class DownloadAudio:
           article_title = title_list[-1].replace(" 반응정리", "")
 
           #파일로 저장
-          f = open('crawl.csv', 'a+', newline='', encoding="utf-8")
-          wr = csv.writer(f)
+          with open('../datas/crawl.csv', 'a+', newline='', encoding="utf-8") as f:
+            wr = csv.writer(f)
+            wr.writerow([article_title, article_link])
 
-          wr.writerow([article_title, article_link])
-          f.close()
 
   def select_audio(self):
     root = tk.Tk()
@@ -66,7 +126,7 @@ class DownloadAudio:
     listbox = tk.Listbox(root, width=50)
     listbox.grid(row=1, column=0, columnspan=2, padx=5, pady=5)
 
-    with open('crawl.csv', 'r', encoding="utf-8") as f:
+    with open('../datas/crawl.csv', 'r', encoding="utf-8") as f:
       rdr = csv.reader(f)
       next(rdr)  # 제목 행 skip
       lines = list(rdr)
@@ -82,20 +142,11 @@ class DownloadAudio:
     listbox.bind("<Double-1>", on_double_click)
     root.mainloop()
 
+
   def download_audio(self):
 
-    import soundfile
-    import os
-    from pytubefix import YouTube
-    from moviepy.editor import AudioFileClip
-    from tkinter import ttk
-    import tkinter.messagebox as msgbox
-
-    from functions import clear_folder, change_to_youtube_url, get_viewer
-    from findStartTime import find_time
-
     youtube_links = []
-    download_path = "video"
+    download_path = "../datas/video"
     
     self.select_audio()
 
@@ -114,8 +165,8 @@ class DownloadAudio:
     root.update()
 
     #기존 파일 삭제
-    clear_folder('./video')
-    clear_folder('./audio')
+    clear_folder('../datas/video')
+    clear_folder('../datas/audio')
 
     browser = login(self.id, self.pw)
     browser.get("https://cafe.naver.com" + self.url)
@@ -155,9 +206,9 @@ class DownloadAudio:
       root.update()
 
     #오디오 시작 시간 조정
-    origin, sr = librosa.load("./audio/원본.wav", sr=None)
+    origin, sr = librosa.load("../datas/audio/원본.wav", sr=None)
 
-    for filename in os.listdir('./audio'):
+    for filename in os.listdir('../datas/audio'):
       if filename != "원본.wav":
         y, _ = librosa.load("./audio/"+filename,sr=sr)
         start_index = find_time(origin, y) * 512
