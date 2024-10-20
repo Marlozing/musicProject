@@ -53,9 +53,8 @@ def find_time(audio1, audio2):
 
   return best_index
 
-
 if __name__ == '__main__':
-  y_1, _ = librosa.load('audio/원본.wav', sr=None)
-  y_2, _ = librosa.load('audio/[아이네].wav', sr=None)
+  y_1, _ = librosa.load('../datas/audio/원본.wav', sr=None)
+  y_2, _ = librosa.load('../datas/audio/[아이네].wav', sr=None)
 
   print(find_time(y_1, y_2) * 512)

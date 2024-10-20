@@ -10,13 +10,11 @@ import soundfile
 from matplotlib.widgets import Slider, Button
 from tkinter import ttk, filedialog
 
-from findStartTime import find_time
-from functions import open_folder
+from FindStartTime import find_time
+from Functions import open_folder
 
 class Adjuster:
-
   def __init__(self, audio1, audio2):
-
     matplotlib.use('TkAgg')
     matplotlib.rcParams['axes.unicode_minus'] = False
     plt.rc('font', family='NanumGothic')
@@ -79,7 +77,6 @@ class Adjuster:
 
   # 슬라이더 업데이트 함수
   def update_index(self, val):
-
     idx = int(self.slider1.val)  # 슬라이더 값 정수로 변환
 
     current_audio = self.audio2[self.first_index + idx:self.first_index + idx + self.limit]
@@ -88,7 +85,6 @@ class Adjuster:
     self.fig.canvas.draw_idle()
 
   def update_length(self, val):
-
     idx = int(self.slider1.val)
     self.limit = int(self.slider2.val)  # 슬라이더 값 정수로 변환
 
@@ -109,71 +105,6 @@ class Adjuster:
     self.final_index = int(self.slider1.val)
     plt.close()
 
-class SelfAdjuster:
-
-  def __init__(self):
-
-    # Tkinter GUI 설정
-    self.root = tk.Tk()
-    self.root.title("User Input Form")
-    self.root.geometry("400x400")  # GUI 크기 설정
-    self.origin = "audio/원본.wav" if os.path.exists("audio/원본.wav") else None
-    self.compare_path = None
-
-    ttk.Label(self.root, text="Read Audio").grid(row=0, column=0, columnspan=2, padx=5, pady=5)
-
-    self.get_origin_button = tk.Button(self.root, text="Open File", command=self.get_origin, font=("Helvetica", 24))
-    self.get_origin_button.grid(row=1, column=0, columnspan=2, padx=5, pady=5)
-
-    self.get_compare_button = tk.Button(self.root, text="Open File", command=self.get_compare, font=("Helvetica", 24))
-    self.get_compare_button.grid(row=1, column=0, columnspan=2, padx=5, pady=5)
-
-    self.quit_button = tk.Button(self.root, text="Quit", command=self.on_closing)
-    self.quit_button.grid(row=2, column=0, columnspan=2, padx=5, pady=5)
-
-    # GUI 실행
-    self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-    self.root.mainloop()
-
-  def get_origin(self):
-
-    self.root.withdraw()
-    file_path = filedialog.askopenfilename(filetypes=[("WAV files", "*.wav")])
-
-    if file_path:
-      self.origin = file_path
-    # 버튼 클릭 시 호출되는 함수
-  def get_compare(self):
-
-    self.root.withdraw()
-    file_path = filedialog.askopenfilename(filetypes=[("WAV files", "*.wav")])
-
-    if file_path:
-      self.compare_path = file_path
-  def submit(self):
-      origin, _ = librosa.load(self.origin, sr=None)
-      y, sr = librosa.load(self.compare_path, sr=None)
-      file_name = file_path.split("/")[-1]
-
-      folder_name = "self adjusted"
-
-      # 조정된 오디오 저장
-      start_index = find_time(origin, y) * 512
-
-      if start_index == 0:
-        y = np.pad(y, (np.argmax(np.abs(origin) > 0.02), 0), 'constant')
-
-      if not os.path.exists(folder_name):
-        os.makedirs(folder_name)  # 조정된 폴더 생성
-
-      soundfile.write(folder_name + "/" + file_name, y, sr)  # 파일 저장
-      open_folder(folder_name)
-
-  def on_closing(self):
-
-    self.root.destroy()
-
-
 def find_start_time(name=None, audio2=None):
   """
   오디오 시작 시간을 찾고 조정하는 함수
@@ -181,7 +112,7 @@ def find_start_time(name=None, audio2=None):
   그에 따라 오디오를 조정하여 저장합니다.
   """
   sr = 44100  # 샘플링 레이트 설정
-  audio1, _ = librosa.load("audio/원본.wav", sr=sr)  # 원본 오디오 로드
+  audio1, _ = librosa.load("../datas/audio/원본.wav", sr=sr)  # 원본 오디오 로드
 
   if name is not None:
     audio2, _ = librosa.load("audio/" + name, sr=sr)  # 비교할 오디오 로드
@@ -214,6 +145,3 @@ def find_start_time(name=None, audio2=None):
     return  # 선택된 파일이 없으면 종료
 
   find_start_time(option.sel)  # 선택된 파일에 대해 다시 시작 시간 찾기
-
-if __name__ == "__main__":
-  SelfAdjuster()

@@ -3,17 +3,15 @@ import tkinter as tk
 
 from tkinter import ttk
 
-from downloadAudio import DownloadAudio
-from waveform_adjuster import find_start_time
-
+from musicProject.services.DownloadAudio import DownloadAudio
+from Adjuster import find_start_time
+from musicProject.Adjuster.SelfFindStartTime import SelfAdjuster
 
 class OptionWindow:
   def __init__(self):
-
     self.sel = None
 
   def read_audio(self):
-
     root = tk.Tk()
     root.title("Option Window")
     root.geometry("400x300")
@@ -23,12 +21,11 @@ class OptionWindow:
     listbox = tk.Listbox(root, width=50)
     listbox.grid(row=1, column=0, columnspan=2, padx=5, pady=5)
 
-    for file in os.listdir("audio"):
+    for file in os.listdir("datas/audio"):
       if file.endswith(".wav") and "원본" not in file:
         listbox.insert(tk.END, file)
 
     def on_double_click(event):
-
       select = listbox.curselection()
       if select:  # 선택된 항목이 있는지 확인
         self.sel = listbox.get(select[0])
@@ -38,7 +35,6 @@ class OptionWindow:
     root.mainloop()
 class Main:
   def __init__(self):
-
     # Tkinter GUI 설정
     self.root = tk.Tk()
     self.root.title("User Input Form")
@@ -101,37 +97,7 @@ class Main:
     self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
     self.root.mainloop()
 
-  def select_audio(self):
-
-    try:
-      self.root.destroy()
-    except tk.TclError:
-      pass
-
-    option = OptionWindow()
-    option.read_audio()
-
-    if option.sel is None:
-      return
-
-    find_start_time(option.sel)
-
-  def download_audio(self, loaded_class = None):
-
-    if loaded_class is None : loaded_class = DownloadAudio(self.entry_id.get(), self.entry_pw.get())
-
-    try:
-      self.root.destroy()
-    except tk.TclError:
-      pass
-
-    if loaded_class.download_audio() is None:
-      return
-
-    self.select_audio()
-
   def submit_data(self):
-
     user_id = self.entry_id.get()
     password = self.entry_pw.get()
     length = self.length_var.get()
@@ -149,13 +115,39 @@ class Main:
 
     self.download_audio(loaded_class)
 
+  def download_audio(self, loaded_class = None):
+    if loaded_class is None :
+      loaded_class = DownloadAudio(self.entry_id.get(), self.entry_pw.get())
+
+    try:
+      self.root.destroy()
+    except tk.TclError:
+      pass
+
+    if loaded_class.download_audio() is None:
+      return
+
+    self.select_audio()
+
+  def select_audio(self):
+    try:
+      self.root.destroy()
+    except tk.TclError:
+      pass
+
+    option = OptionWindow()
+    option.read_audio()
+
+    if option.sel is None:
+      return
+
+    find_start_time(option.sel)
+
   def self_adjust(self):
-
     self.root.destroy()
-
+    SelfAdjuster()
 
   def on_closing(self):
-
     self.root.destroy()
 
 if __name__ == "__main__":
