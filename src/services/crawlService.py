@@ -17,7 +17,7 @@ class CrawlService:
         self.transport = AsyncHTTPTransport(retries=1)
 
         # 유저의 게시물 링크를 저장할 DB
-        self.db_conn = sqlite3.connect("database/posted_link.db")
+        self.db_conn = sqlite3.connect("../database/posted_link.db")
 
     async def checkForNewPosts(self, max_page: int):
         if not self.transport:
@@ -70,13 +70,3 @@ class CrawlService:
                     )
                     self.db_conn.commit()
             # endregion
-
-    async def downVideo(self, reaction_url):
-        async with AsyncClient(transport=self.transport) as client:
-            response = await client.get(reaction_url)
-
-            response.raise_for_status()
-
-            soup = BeautifulSoup(response.text, "html.parser")
-            print(soup)
-            return response
