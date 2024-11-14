@@ -8,6 +8,7 @@ import subprocess
 import asyncio
 import librosa
 import numpy as np
+import dotenv
 
 from tempfile import TemporaryDirectory
 
@@ -193,10 +194,10 @@ def login():
     browser.implicitly_wait(2)  # 로드 대기
 
     browser.execute_script(
-        f"document.getElementsByName('id')[0].value='{Personal_information.NAVER_ID}'"
+        f"document.getElementsByName('id')[0].value='{os.getenv('NAVER_ID')}'"
     )  # ID 입력
     browser.execute_script(
-        f"document.getElementsByName('pw')[0].value='{Personal_information.NAVER_PW}'"
+        f"document.getElementsByName('pw')[0].value='{os.getenv('NAVER_PW')}'"
     )  # 비밀번호 입력
     browser.find_element(
         by=By.XPATH, value='//*[@id="log.login"]'
