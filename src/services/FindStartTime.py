@@ -1,9 +1,8 @@
+import librosa
 import numpy as np
 import ray
-import librosa
-from sklearn.model_selection import ParameterGrid
 from constants import crawl as CrawlConstants
-import asyncio
+from sklearn.model_selection import ParameterGrid
 
 # ray 초기화
 ray.init(object_store_memory=4 * 1024 * 1024 * 1024)
@@ -53,7 +52,8 @@ async def find_time(audio1, audio2):
     param_grid = {}
 
     compiled_audio1 = audio1[: 20 * CrawlConstants.SAMPLE_RATE] / np.max(np.abs(audio1))
-    compiled_audio2 = audio2[: 2 * 60 * CrawlConstants.SAMPLE_RATE] / np.max(np.abs(audio2)
+    compiled_audio2 = audio2[: 2 * 60 * CrawlConstants.SAMPLE_RATE] / np.max(
+        np.abs(audio2)
     )
 
     # MFCC 특징 추출

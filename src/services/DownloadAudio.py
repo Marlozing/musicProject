@@ -1,28 +1,21 @@
-import time
-import csv
+import asyncio
 import os
 import sqlite3
-import tkinter as tk
-import soundfile
 import subprocess
-import asyncio
-import librosa
-import numpy as np
-import dotenv
-
+import time
+import tkinter as tk
 from tempfile import TemporaryDirectory
 
-from tkinter import messagebox as msgbox
-from tkinter import ttk
-
+import librosa
+import numpy as np
+import soundfile
+from bs4 import BeautifulSoup as bs
+from constants.crawl import SAMPLE_RATE
 from pytubefix import YouTube
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from bs4 import BeautifulSoup as bs
 
 from .FindStartTime import find_time
-from constants.crawl import SAMPLE_RATE
-from constants import Personal_information
 
 
 # region 폴더 정리
@@ -34,6 +27,36 @@ def clear_folder(path: str):
             file_path = os.path.join(path, filename)
             if os.path.isfile(file_path):
                 os.remove(file_path)  # 파일 삭제
+
+
+# endregion
+
+
+# region 로그인
+def login():
+    login_url = "https://nid.naver.com/nidlogin.login"
+
+    options = webdriver.ChromeOptions()
+    options.add_argument("disable-gpu")  # GPU 가속 비활성화
+    options.add_argument("headless")
+
+    # Chrome 브라우저 인스턴스 생성
+    browser = webdriver.Chrome(options=options)
+    browser.get(login_url)  # 로그인 페이지 열기
+    browser.implicitly_wait(2)  # 로드 대기
+
+    browser.execute_script(
+        f"document.getElementsByName('id')[0].value='{os.getenv('NAVER_ID')}'"
+    )  # ID 입력
+    browser.execute_script(
+        f"document.getElementsByName('pw')[0].value='{os.getenv('NAVER_PW')}'"
+    )  # 비밀번호 입력
+    browser.find_element(
+        by=By.XPATH, value='//*[@id="log.login"]'
+    ).click()  # 로그인 버튼 클릭
+    time.sleep(1)  # 잠시 대기
+
+    return browser
 
 
 # endregion
@@ -94,7 +117,6 @@ def get_viewer(author: str, title: str) -> str:
 
 # region 유튜브 다운로드
 async def download_youtube(yt: YouTube, title: str, temp_dir: str):
-
     video_stream = yt.streams.filter(resolution="1080p", file_extension="mp4").first()
     audio_stream = yt.streams.filter(only_audio=True, file_extension="mp4").first()
 
@@ -109,7 +131,6 @@ async def download_youtube(yt: YouTube, title: str, temp_dir: str):
 
 # region 동영상 파일 시간 조정
 async def adjust_audio_start_time(title: str, temp_dir: str, origin_audio: np.ndarray):
-
     if title != "원본":
         audio, _ = await asyncio.to_thread(
             librosa.load, f"{temp_dir}/{title}.wav", sr=None
@@ -120,7 +141,7 @@ async def adjust_audio_start_time(title: str, temp_dir: str, origin_audio: np.nd
         await asyncio.to_thread(
             soundfile.write,
             f"{temp_dir}/{title}.wav",
-            audio[0][start_index:],
+            audio[start_index:],
             SAMPLE_RATE,
         )
 
@@ -179,41 +200,10 @@ async def adjust_audio_start_time(title: str, temp_dir: str, origin_audio: np.nd
 # endregion
 
 
-# region 로그인
-def login():
-
-    login_url = "https://nid.naver.com/nidlogin.login"
-
-    options = webdriver.ChromeOptions()
-    options.add_argument("disable-gpu")  # GPU 가속 비활성화
-    options.add_argument("headless")
-
-    # Chrome 브라우저 인스턴스 생성
-    browser = webdriver.Chrome(options=options)
-    browser.get(login_url)  # 로그인 페이지 열기
-    browser.implicitly_wait(2)  # 로드 대기
-
-    browser.execute_script(
-        f"document.getElementsByName('id')[0].value='{os.getenv('NAVER_ID')}'"
-    )  # ID 입력
-    browser.execute_script(
-        f"document.getElementsByName('pw')[0].value='{os.getenv('NAVER_PW')}'"
-    )  # 비밀번호 입력
-    browser.find_element(
-        by=By.XPATH, value='//*[@id="log.login"]'
-    ).click()  # 로그인 버튼 클릭
-    time.sleep(1)  # 잠시 대기
-
-    return browser
-
-
-# endregion
-
-
 class DownloadAudio:
     # region 초기화
-    def __init__(self):
-        self.url = None
+    def __init__(self, url: str):
+        self.url = url
         db_conn = sqlite3.connect("../database/posted_link.db")
         db_cur = db_conn.cursor()
         db_cur.execute("SELECT * FROM posted_link ORDER BY link DESC")
@@ -222,42 +212,10 @@ class DownloadAudio:
 
     # endregion
 
-    # region 오디오 선택 함수
-    def select_audio(self):
-        root = tk.Tk()
-        root.title("오디오 선택창")
-        root.geometry("400x300")
-
-        tk.Label(root, text="Download Audio").grid(
-            row=0, column=0, columnspan=2, padx=5, pady=5
-        )
-
-        listbox = tk.Listbox(root, width=50)
-        listbox.grid(row=1, column=0, columnspan=2, padx=5, pady=5)
-
-        for item in self.db_list:
-            listbox.insert(tk.END, item[1])
-
-        def on_double_click(event):
-            select = listbox.curselection()
-            if select:
-                self.url = self.db_list[select[0]][0]  # 선택된 URL 저장
-                root.destroy()  # 창 닫기
-
-        listbox.bind("<Double-1>", on_double_click)  # 더블 클릭 이벤트 바인딩
-        root.mainloop()  # Tkinter 이벤트 루프 시작
-
-    # endregion
-
     # region 오디오 다운로드 함수
     async def download_audio(self):
         youtube_links = []
         download_path = "../data/video"
-
-        self.select_audio()
-
-        if self.url is None:
-            return
 
         # region 기존 파일 삭제
         clear_folder(download_path)
@@ -282,7 +240,6 @@ class DownloadAudio:
             data = data.find_all_next(class_="__se_module_data")[0]
             watch_url = change_to_youtube_url(str(data))
             youtube_links.append(watch_url)
-
         browser.quit()
         # endregion
 
@@ -298,23 +255,21 @@ class DownloadAudio:
             yt = YouTube(link)
             youtubes_dict[get_viewer(yt.author, yt.title)] = yt
 
-        temp_dict = TemporaryDirectory().name
+        with TemporaryDirectory() as temp_dict:
 
-        tasks = []
-        for key in youtubes_dict.keys():
-            tasks.append(download_youtube(youtubes_dict[key], key, temp_dict))
+            tasks = []
+            for key in youtubes_dict.keys():
+                tasks.append(download_youtube(youtubes_dict[key], key, temp_dict))
 
-        await asyncio.gather(*tasks)
+            await asyncio.gather(*tasks)
 
-        print("TEST")
+            origin_audio, _ = librosa.load(f"{temp_dict}/원본.wav", sr=None)
 
-        origin_audio, _ = librosa.load(f"{temp_dict}/원본.wav", sr=None)
+            tasks = []
+            for key in youtubes_dict.keys():
+                tasks.append(adjust_audio_start_time(key, temp_dict, origin_audio))
 
-        tasks = []
-        for key in youtubes_dict.keys():
-            tasks.append(adjust_audio_start_time(key, temp_dict, origin_audio))
-
-        await asyncio.gather(*tasks)
+            await asyncio.gather(*tasks)
         # endregion
 
     # endregion
