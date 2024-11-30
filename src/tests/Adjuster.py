@@ -1,14 +1,12 @@
-import numpy as np
+import os
+import tkinter as tk
+
+import librosa
 import matplotlib
 import matplotlib.pyplot as plt
-import tkinter as tk
-import librosa
-import os
-import sys
+import numpy as np
 import soundfile
-
 from matplotlib.widgets import Slider, Button
-from tkinter import ttk, filedialog
 
 
 class Adjuster:
@@ -125,7 +123,6 @@ class Adjuster:
 
     # 버튼 클릭 시 호출되는 함수
     def send(self, event):
-
         self.final_index = int(self.slider1.val)
         plt.close()
 

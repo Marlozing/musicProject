@@ -1,9 +1,8 @@
-import tkinter as tk
 import os
-
-from tkinter import ttk
+import tkinter as tk
 from tkinter import filedialog
 from tkinter import messagebox as msgbox
+from tkinter import ttk
 
 
 def open_folder(folder_path):
