@@ -55,7 +55,7 @@ const ListPage = () => {
                     style={{ width: '100%', height: '4vh', fontSize: '1.6em' }}
                     onClick={() => {
                         // API로 POST 요청 보내기
-                        fetch('/api/trigger_refresh', {
+                        fetch('/api/refresh', {
                             method: 'POST',
                         })
                         .then(response => {
