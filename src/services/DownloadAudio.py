@@ -115,32 +115,43 @@ def get_viewer(author: str, title: str) -> str:
 # endregion 로그인 함수
 
 
-# region 유튜브 다운로드
-async def download_youtube(yt: YouTube, title: str, temp_dir: str):
-    video_stream = yt.streams.filter(resolution="1080p", file_extension="mp4").first()
-    audio_stream = yt.streams.filter(only_audio=True, file_extension="mp4").first()
+class DownloadAudio:
+    # region 초기화
+    def __init__(self, url: str):
+        self.url = url
+        db_conn = sqlite3.connect("../database/posted_link.db")
+        db_cur = db_conn.cursor()
+        db_cur.execute("SELECT * FROM posted_link ORDER BY link DESC")
+        self.db_list = db_cur.fetchall()
+        db_conn.close()
+        self.temp_dir = TemporaryDirectory().name
+        self.origin_audio = None
 
-    video_stream.download(output_path=temp_dir, filename=f"{title}.mp4")
-    audio_stream.download(output_path=temp_dir, filename=f"{title}.wav")
+    # endregion
 
-    print(f"{title} 다운로드 완료")
+    # region 유튜브 다운로드
+    async def download_youtube(self, yt: YouTube, title: str):
+        video_stream = yt.streams.filter(
+            resolution="1080p", file_extension="mp4"
+        ).first()
+        audio_stream = yt.streams.filter(only_audio=True, file_extension="mp4").first()
 
+        video_stream.download(output_path=self.temp_dir, filename=f"{title}.mp4")
+        audio_stream.download(output_path=self.temp_dir, filename=f"{title}.wav")
 
-# endregion
+    # endregion
 
-
-# region 동영상 파일 시간 조정
-async def adjust_audio_start_time(title: str, temp_dir: str, origin_audio: np.ndarray):
-    if title != "원본":
+    # region 동영상 파일 시간 조정
+    async def adjust_audio_start_time(self, title: str):
         audio, _ = await asyncio.to_thread(
-            librosa.load, f"{temp_dir}/{title}.wav", sr=None
+            librosa.load, f"{self.temp_dir}/{title}.wav", sr=None
         )
-        start_index = await find_time(origin_audio, audio) * 512
+        start_index = await find_time(self.origin_audio, audio) * 512
         start_time = start_index / 44100
 
         await asyncio.to_thread(
             soundfile.write,
-            f"{temp_dir}/{title}.wav",
+            f"{self.temp_dir}/{title}.wav",
             audio[start_index:],
             SAMPLE_RATE,
         )
@@ -151,70 +162,42 @@ async def adjust_audio_start_time(title: str, temp_dir: str, origin_audio: np.nd
             "-ss",
             f"00:00:{start_time}",  # 시작 시간
             "-i",
-            f"{temp_dir}/{title}.mp4",  # 입력 비디오 파일
+            f"{self.temp_dir}/{title}.mp4",  # 입력 비디오 파일
             "-c",
             "copy",  # 비디오와 오디오를 재인코딩하지 않고 복사
-            f"{temp_dir}/video.mp4",  # 출력 비디오 파일
+            f"{self.temp_dir}/{title}_compiled.mp4",  # 출력 비디오 파일
         ]
 
         await asyncio.to_thread(
             subprocess.run, command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
-    else:
+
         command = [
             "ffmpeg",
-            "-y",
             "-i",
-            f"{temp_dir}/{title}.mp4",  # 입력 비디오 파일
-            "-c",
-            "copy",  # 비디오와 오디오를 재인코딩하지 않고 복사
-            f"{temp_dir}/video.mp4",  # 출력 비디오 파일
+            f"{self.temp_dir}/{title}_compiled.mp4",
+            "-i",
+            f"{self.temp_dir}/{title}.wav",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-strict",
+            "experimental",
+            f"../data/video/{title}.mp4",
         ]
 
         await asyncio.to_thread(
             subprocess.run, command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
-
-    command = [
-        "ffmpeg",
-        "-i",
-        f"{temp_dir}/video.mp4",
-        "-i",
-        f"{temp_dir}/{title}.wav",
-        "-c:v",
-        "copy",
-        "-c:a",
-        "aac",
-        "-strict",
-        "experimental",
-        f"../data/video/{title}.mp4",
-    ]
-
-    await asyncio.to_thread(
-        subprocess.run, command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
-
-    print(f"{title} 최적화 완료")
-
-
-# endregion
-
-
-class DownloadAudio:
-    # region 초기화
-    def __init__(self, url: str):
-        self.url = url
-        db_conn = sqlite3.connect("../database/posted_link.db")
-        db_cur = db_conn.cursor()
-        db_cur.execute("SELECT * FROM posted_link ORDER BY link DESC")
-        self.db_list = db_cur.fetchall()
-        db_conn.close()
 
     # endregion
 
     # region 오디오 다운로드 함수
     async def download_audio(self):
         youtube_links = []
+        download_tasks = []
+        adjust_tasks = []
         download_path = "../data/video"
 
         # region 기존 파일 삭제
@@ -255,21 +238,41 @@ class DownloadAudio:
             yt = YouTube(link)
             youtubes_dict[get_viewer(yt.author, yt.title)] = yt
 
-        with TemporaryDirectory() as temp_dict:
+        # region 원본 영상 처리
+        await self.download_youtube(youtubes_dict["원본"], "원본")
+        del youtubes_dict["원본"]
 
-            tasks = []
-            for key in youtubes_dict.keys():
-                tasks.append(download_youtube(youtubes_dict[key], key, temp_dict))
+        command = [
+            "ffmpeg",
+            "-i",
+            f"{self.temp_dir}/원본.mp4",
+            "-i",
+            f"{self.temp_dir}/원본.wav",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-strict",
+            "experimental",
+            f"../data/video/원본.mp4",
+        ]
 
-            await asyncio.gather(*tasks)
+        subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # endregion
 
-            origin_audio, _ = librosa.load(f"{temp_dict}/원본.wav", sr=None)
+        self.origin_audio, _ = librosa.load(
+            f"{self.temp_dir}/원본.wav", sr=None, mono=True
+        )
 
-            tasks = []
-            for key in youtubes_dict.keys():
-                tasks.append(adjust_audio_start_time(key, temp_dict, origin_audio))
+        # region 다운로드 및 시간 조정
+        for key in youtubes_dict.keys():
+            download_tasks.append(self.download_youtube(youtubes_dict[key], key))
+            adjust_tasks.append(self.adjust_audio_start_time(key))
 
-            await asyncio.gather(*tasks)
+        await asyncio.gather(*download_tasks)
+        await asyncio.gather(*adjust_tasks)
+        # endregion
+
         # endregion
 
     # endregion
