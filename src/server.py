@@ -7,7 +7,7 @@ import os
 import tracemalloc
 
 from services.crawlService import CrawlService
-from services.DownloadAudio import DownloadAudio
+from services.DownloadAudio import DownloadAudio, process_title
 
 tracemalloc.start()
 app = Flask(__name__)
@@ -18,7 +18,7 @@ socketio = SocketIO(app, cors_allowed_origins="http://localhost:3000")
 # region 데이터 가져오기
 async def get_data():
     if not os.path.exists("../database/posted_link.db"):
-        await CrawlService().checkForNewPosts(10)
+        await CrawlService().checkForNewPosts(100)
 
     db_conn = sqlite3.connect("../database/posted_link.db")
     db_cur = db_conn.cursor()
@@ -28,22 +28,7 @@ async def get_data():
 
     title_dict = {}
     for item in db_list:
-        if "했어요]" in item[1]:
-            title = item[1].split("했어요]")[1].replace(" 반응정리", "").split("/")
-        else:
-            title = item[1].replace(" 반응정리", "").split("/")
-
-        viewer = ""
-        if any(t in title[1] for t in ["👃", "💜", "💛", "🖤", "❤️", "💙", "💚", "☢️"]):
-            viewer = title[1]
-        else:
-            if title[2] is not None:
-                viewer = title[2]
-
-        viewer = viewer.replace("💙", "🩵")
-        viewer = viewer.replace("🖤", "💙")
-
-        title_dict[item[0]] = [title[0], viewer]
+        title_dict[item[0]] = process_title(item[1])
 
     return title_dict
 
@@ -76,7 +61,7 @@ def trigger_refresh():
 @app.route("/api/signal", methods=["POST"])
 def get_signal():
     data = request.get_json()
-    asyncio.run(DownloadAudio(data["link"]).download_audio())
+    asyncio.run(DownloadAudio(data).download_audio())
     socketio.emit("done", {"message": "Successfully downloaded!"})
     return "Signal received", 200
 
@@ -87,7 +72,7 @@ def get_signal():
 # region 게시물 다시 받아오기
 @app.route("/api/refresh", methods=["POST"])
 async def get_refresh():
-    await CrawlService().checkForNewPosts(10)
+    await CrawlService().check_new_posts(10)
     await send_data()
     trigger_refresh()
     return jsonify({"message": "Signal received"}), 200
@@ -96,4 +81,4 @@ async def get_refresh():
 # endregion
 
 if __name__ == "__main__":
-    socketio.run(app, debug=True, allow_unsafe_werkzeug=True)
+    socketio.run(app, allow_unsafe_werkzeug=True)

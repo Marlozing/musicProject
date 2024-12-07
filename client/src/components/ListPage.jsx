@@ -26,7 +26,7 @@ const ListPage = () => {
         };
     }, []);
 
-    const handleButtonClick = (key) => {
+    const handleButtonClick = (key, value) => {
         window.location.href = "/loading";
         // API로 POST 요청 보내기
         fetch('/api/signal', {
@@ -34,7 +34,7 @@ const ListPage = () => {
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ link: key }), // 전송할 데이터: key
+            body: JSON.stringify({ "link": key, "reactions": value}), // 전송할 데이터: key, title
         })
         .then(response => {
             if (response.ok) {
@@ -79,7 +79,7 @@ const ListPage = () => {
                 <div style={{ display: 'flex', justifyContent: 'center' }} key={key}>
                     <button
                         style={{ width: '150%', fontSize: '1.6em' }}
-                        onClick={() => handleButtonClick(key)} // 버튼 클릭 시 key 전송
+                        onClick={() => handleButtonClick(key, value[1])} // 버튼 클릭 시 key 전송
                     >
                         {value[0]}
                     </button>
