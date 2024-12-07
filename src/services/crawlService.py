@@ -12,7 +12,7 @@ class CrawlService:
 
         # 유저의 게시물 링크를 저장할 DB
         self.db_conn = sqlite3.connect("../database/posted_link.db")
-    async def checkForNewPosts(self, max_page: int):
+    async def check_new_posts(self, max_page: int):
         if not self.transport:
             raise Exception("httpx AsyncHTTPTransport is not initialised or destoryed.")
 
@@ -52,13 +52,25 @@ class CrawlService:
 
             # region DB에 저장
             for article in article_list[::-1]:
-
                 url = f"https://cafe.naver.com/steamindiegame/{article['articleId']}"
 
-                if not any(url in link for link in posted_link):
+                # 링크가 이미 존재하는지 확인
+                db_cur.execute("SELECT title FROM posted_link WHERE link = ?", (url,))
+                existing_title = db_cur.fetchone()
+
+                if existing_title is None:
+                    # 링크가 존재하지 않을 경우, 새로 삽입
                     db_cur.execute(
                         "INSERT INTO posted_link (link, title) VALUES (?, ?)",
                         (url, str(article["subject"])),
                     )
-                    self.db_conn.commit()
+                else:
+                    # 링크가 존재할 경우, 제목이 변경되었는지 확인
+                    if existing_title[0] != str(article["subject"]):
+                        db_cur.execute(
+                            "UPDATE posted_link SET title = ? WHERE link = ?",
+                            (str(article["subject"]), url),
+                        )
             # endregion
+
+            self.db_conn.commit()

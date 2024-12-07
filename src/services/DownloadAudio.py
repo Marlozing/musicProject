@@ -2,9 +2,10 @@ import asyncio
 import os
 import sqlite3
 import subprocess
-import time
-import tkinter as tk
 from tempfile import TemporaryDirectory
+import sqlite3
+import time
+import warnings
 
 import librosa
 import numpy as np
@@ -16,6 +17,12 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 
 from .FindStartTime import find_time
+
+# 특정 경고 무시
+warnings.filterwarnings("ignore", category=UserWarning, message="PySoundFile failed.*")
+warnings.filterwarnings(
+    "ignore", category=FutureWarning, message="librosa.core.audio.__audioread_load.*"
+)
 
 
 # region 폴더 정리
@@ -115,10 +122,30 @@ def get_viewer(author: str, title: str) -> str:
 # endregion 로그인 함수
 
 
+# region 제목 처리
+def process_title(title: str):
+    if "했어요]" in title:
+        splited_title = title.split("했어요]")[1].replace(" 반응정리", "").split("/")
+    else:
+        splited_title = title.replace(" 반응정리", "").split("/")
+
+    final_title = "".join(splited_title[:-1])
+    viewer = splited_title[-1]
+
+    viewer = viewer.replace("💙", "🩵")
+    viewer = viewer.replace("🖤", "💙")
+
+    return [final_title, viewer]
+
+
+# endregion
+
+
 class DownloadAudio:
     # region 초기화
-    def __init__(self, url: str):
-        self.url = url
+    def __init__(self, data: dict):
+        self.url = data["link"]
+        self.reactions = data["reactions"]
         db_conn = sqlite3.connect("../database/posted_link.db")
         db_cur = db_conn.cursor()
         db_cur.execute("SELECT * FROM posted_link ORDER BY link DESC")
@@ -198,7 +225,7 @@ class DownloadAudio:
         youtube_links = []
         download_tasks = []
         adjust_tasks = []
-        download_path = "../data/video"
+        download_path = "../video"
 
         # region 기존 파일 삭제
         clear_folder(download_path)
@@ -213,6 +240,15 @@ class DownloadAudio:
 
         browser.switch_to.frame("cafe_main")
         soup = bs(browser.page_source, "html.parser")
+        title = soup.find_all(class_="title_text")[0].text
+        if process_title(title)[1] != self.reactions:
+            db_conn = sqlite3.connect("../database/posted_link.db")
+            db_conn.execute(
+                "UPDATE posted_link SET title = ? WHERE link = ?",
+                (title, self.url),
+            )
+            db_conn.commit()
+
         datas = soup.find_all(
             class_="se-component se-oembed se-l-default __se-component"
         )
