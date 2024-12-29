@@ -11,18 +11,19 @@ import librosa
 import numpy as np
 import soundfile
 from bs4 import BeautifulSoup as bs
-from constants.crawl import SAMPLE_RATE
 from pytubefix import YouTube
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 
 from .FindStartTime import find_time
 
-# 특정 경고 무시
+# region 특정 경고 무시
 warnings.filterwarnings("ignore", category=UserWarning, message="PySoundFile failed.*")
 warnings.filterwarnings(
     "ignore", category=FutureWarning, message="librosa.core.audio.__audioread_load.*"
 )
+# endregion
 
 
 # region 폴더 정리
@@ -40,30 +41,33 @@ def clear_folder(path: str):
 
 
 # region 로그인
-def login():
+def login(naver_id: str, naver_pw: str):
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless")  # Headless 모드
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+
+    driver = webdriver.Remote(
+        command_executor="http://localhost:4444/wd/hub", options=options
+    )
+
     login_url = "https://nid.naver.com/nidlogin.login"
 
-    options = webdriver.ChromeOptions()
-    options.add_argument("disable-gpu")  # GPU 가속 비활성화
-    options.add_argument("headless")
+    driver.get(login_url)  # 로그인 페이지 열기
+    driver.implicitly_wait(2)  # 로드 대기
 
-    # Chrome 브라우저 인스턴스 생성
-    browser = webdriver.Chrome(options=options)
-    browser.get(login_url)  # 로그인 페이지 열기
-    browser.implicitly_wait(2)  # 로드 대기
-
-    browser.execute_script(
-        f"document.getElementsByName('id')[0].value='{os.getenv('NAVER_ID')}'"
+    driver.execute_script(
+        f"document.getElementsByName('id')[0].value='{naver_id}'"
     )  # ID 입력
-    browser.execute_script(
-        f"document.getElementsByName('pw')[0].value='{os.getenv('NAVER_PW')}'"
+    driver.execute_script(
+        f"document.getElementsByName('pw')[0].value='{naver_pw}'"
     )  # 비밀번호 입력
-    browser.find_element(
+    driver.find_element(
         by=By.XPATH, value='//*[@id="log.login"]'
     ).click()  # 로그인 버튼 클릭
     time.sleep(1)  # 잠시 대기
 
-    return browser
+    return driver
 
 
 # endregion
@@ -146,7 +150,7 @@ class DownloadAudio:
     def __init__(self, data: dict):
         self.url = data["link"]
         self.reactions = data["reactions"]
-        db_conn = sqlite3.connect("../database/posted_link.db")
+        db_conn = sqlite3.connect("./database/posted_link.db")
         db_cur = db_conn.cursor()
         db_cur.execute("SELECT * FROM posted_link ORDER BY link DESC")
         self.db_list = db_cur.fetchall()
@@ -163,13 +167,17 @@ class DownloadAudio:
         ).first()
         audio_stream = yt.streams.filter(only_audio=True, file_extension="mp4").first()
 
-        video_stream.download(output_path=self.temp_dir, filename=f"{title}.mp4")
-        audio_stream.download(output_path=self.temp_dir, filename=f"{title}.wav")
+        try:
+            video_stream.download(output_path=self.temp_dir, filename=f"{title}.mp4")
+            audio_stream.download(output_path=self.temp_dir, filename=f"{title}.wav")
+        except:
+            print(f"Error: {title}")
+            return
 
     # endregion
 
     # region 동영상 파일 시간 조정
-    async def adjust_audio_start_time(self, title: str):
+    async def adjust_audio_start_time(self, title: str, output_path: str = "../video"):
         audio, _ = await asyncio.to_thread(
             librosa.load, f"{self.temp_dir}/{title}.wav", sr=None
         )
@@ -180,7 +188,7 @@ class DownloadAudio:
             soundfile.write,
             f"{self.temp_dir}/{title}.wav",
             audio[start_index:],
-            SAMPLE_RATE,
+            44100,
         )
 
         command = [
@@ -211,7 +219,7 @@ class DownloadAudio:
             "aac",
             "-strict",
             "experimental",
-            f"../data/video/{title}.mp4",
+            f"{output_path}/{title}.mp4",
         ]
 
         await asyncio.to_thread(
@@ -221,7 +229,7 @@ class DownloadAudio:
     # endregion
 
     # region 오디오 다운로드 함수
-    async def download_audio(self):
+    async def download_audio(self, naver_id: str, naver_pw: str):
         youtube_links = []
         download_tasks = []
         adjust_tasks = []
@@ -232,7 +240,7 @@ class DownloadAudio:
         # endregion
 
         # region 크롤링
-        browser = login()
+        browser = login(naver_id, naver_pw)
 
         browser.get(self.url)
 
@@ -242,7 +250,7 @@ class DownloadAudio:
         soup = bs(browser.page_source, "html.parser")
         title = soup.find_all(class_="title_text")[0].text
         if process_title(title)[1] != self.reactions:
-            db_conn = sqlite3.connect("../database/posted_link.db")
+            db_conn = sqlite3.connect("./database/posted_link.db")
             db_conn.execute(
                 "UPDATE posted_link SET title = ? WHERE link = ?",
                 (title, self.url),
@@ -271,12 +279,19 @@ class DownloadAudio:
         # region 유튜브 영상 다운로드
         youtubes_dict = {}
         for link in youtube_links:
-            yt = YouTube(link)
-            youtubes_dict[get_viewer(yt.author, yt.title)] = yt
+            try:
+                yt = YouTube(link)
+                youtubes_dict[get_viewer(yt.author, yt.title)] = yt
+            except:
+                pass
+
+        default_video_name = "원본"
+        if not "원본" in youtubes_dict.keys():
+            default_video_name = list(youtubes_dict.keys())[0]
 
         # region 원본 영상 처리
-        await self.download_youtube(youtubes_dict["원본"], "원본")
-        del youtubes_dict["원본"]
+        await self.download_youtube(youtubes_dict[default_video_name], "원본")
+        del youtubes_dict[default_video_name]
 
         command = [
             "ffmpeg",
@@ -290,11 +305,14 @@ class DownloadAudio:
             "aac",
             "-strict",
             "experimental",
-            f"../data/video/원본.mp4",
+            f"{download_path}/원본.mp4",
         ]
 
         subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         # endregion
+
+        if len(youtubes_dict) == 0:
+            return
 
         self.origin_audio, _ = librosa.load(
             f"{self.temp_dir}/원본.wav", sr=None, mono=True
@@ -303,7 +321,7 @@ class DownloadAudio:
         # region 다운로드 및 시간 조정
         for key in youtubes_dict.keys():
             download_tasks.append(self.download_youtube(youtubes_dict[key], key))
-            adjust_tasks.append(self.adjust_audio_start_time(key))
+            adjust_tasks.append(self.adjust_audio_start_time(key, download_path))
 
         await asyncio.gather(*download_tasks)
         await asyncio.gather(*adjust_tasks)

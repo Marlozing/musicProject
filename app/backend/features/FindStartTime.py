@@ -1,11 +1,11 @@
 import librosa
 import numpy as np
 import ray
-from constants import crawl as CrawlConstants
 from sklearn.model_selection import ParameterGrid
 
-# ray 초기화
-ray.init(object_store_memory=4 * 1024 * 1024 * 1024)
+# region ray 초기화
+ray.init(object_store_memory=5 * 1024 * 1024 * 1024)
+# endregion
 
 
 # region HyperDTW
@@ -51,17 +51,17 @@ def compute_dtw(mfcc_1, mfcc_2_slice):
 async def find_time(audio1, audio2):
     param_grid = {}
 
-    compiled_audio1 = audio1[: 20 * CrawlConstants.SAMPLE_RATE] / np.max(np.abs(audio1))
-    compiled_audio2 = audio2[: 2 * 60 * CrawlConstants.SAMPLE_RATE] / np.max(
+    compiled_audio1 = audio1[: 20 * 44100] / np.max(np.abs(audio1))
+    compiled_audio2 = audio2[: 2 * 60 * 44100] / np.max(
         np.abs(audio2)
     )
 
     # MFCC 특징 추출
     mfcc_1 = librosa.feature.mfcc(
-        y=compiled_audio1, sr=CrawlConstants.SAMPLE_RATE, n_mfcc=13
+        y=compiled_audio1, sr=44100, n_mfcc=13
     )
     mfcc_2 = librosa.feature.mfcc(
-        y=compiled_audio2, sr=CrawlConstants.SAMPLE_RATE, n_mfcc=13
+        y=compiled_audio2, sr=44100, n_mfcc=13
     )
     best_index = await hyper_dtw(mfcc_1, mfcc_2, param_grid)
 

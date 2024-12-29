@@ -8,33 +8,33 @@ const ListPage = () => {
     const [items, setItems] = useState({});
 
     useEffect(() => {
-        fetch('/api/data')  // Flask API 호출
+        fetch('/api/data')  // Flask API call
             .then(response => response.json())
             .then(data => setItems(data))
             .catch(error => console.error('Error fetching data:', error));
     }, []);
 
     useEffect(() => {
-        // 서버에서 새로 고침 신호 수신
+        // Listen for refresh signal from server
         socket.on('refresh', () => {
             console.log("Refresh signal received from server");
-            window.location.reload();  // 페이지 새로 고침
+            window.location.reload();  // Refresh the page
         });
 
         return () => {
-            socket.off('refresh'); // 컴포넌트 언마운트 시 이벤트 리스너 정리
+            socket.off('refresh'); // Clean up event listener on component unmount
         };
     }, []);
 
     const handleButtonClick = (key, value) => {
         window.location.href = "/loading";
-        // API로 POST 요청 보내기
+        // Send POST request to API
         fetch('/api/signal', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ "link": key, "reactions": value}), // 전송할 데이터: key, title
+            body: JSON.stringify({ "link": key, "reactions": value }), // Data to send: key, title
         })
         .then(response => {
             if (response.ok) {
@@ -54,7 +54,7 @@ const ListPage = () => {
                 <button
                     style={{ width: '100%', height: '4vh', fontSize: '1.6em' }}
                     onClick={() => {
-                        // API로 POST 요청 보내기
+                        // Send POST request to API
                         fetch('/api/refresh', {
                             method: 'POST',
                         })
@@ -65,7 +65,7 @@ const ListPage = () => {
                             throw new Error('Network response was not ok.');
                         })
                         .then(data => {
-                            console.log(data.message); // 응답 메시지 출력
+                            console.log(data.message); // Log response message
                         })
                         .catch(error => {
                             console.error('Error:', error);
@@ -79,7 +79,7 @@ const ListPage = () => {
                 <div style={{ display: 'flex', justifyContent: 'center' }} key={key}>
                     <button
                         style={{ width: '150%', fontSize: '1.6em' }}
-                        onClick={() => handleButtonClick(key, value[1])} // 버튼 클릭 시 key 전송
+                        onClick={() => handleButtonClick(key, value[1])} // Send key on button click
                     >
                         {value[0]}
                     </button>
