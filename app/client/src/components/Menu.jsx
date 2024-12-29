@@ -6,7 +6,10 @@ const Menu = () => {
         <div className="main-container">
             <table width="100%" border="0">
                 <tbody>
-                    <tr className="a1" bgcolor="black"><img src="image.png" alt="Example" style={{ float: 'left' }} />
+                    <tr className="a1" bgcolor="black">
+                        <td>
+                            < img src="image.png" alt="Example" style={{ float: 'left' }} />
+                        </td>
                         <td></td>
                         <td></td>
                         <td></td>
