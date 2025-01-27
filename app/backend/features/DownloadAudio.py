@@ -171,15 +171,15 @@ class DownloadAudio:
     # region 동영상 파일 시간 조정
     async def adjust_audio_start_time(self, title: str, output_path: str = "../video"):
         audio, _ = await asyncio.to_thread(
-            librosa.load, f"{self.temp_dir}/{title}.wav", sr=None, mono=True
+            librosa.load, f"{self.temp_dir}/{title}.wav", sr=None, mono=False
         )
-        start_index = await find_time(self.origin_audio, audio) * 512
+        start_index = await find_time(self.origin_audio, audio[0]) * 512
         start_time = start_index / 44100
 
         await asyncio.to_thread(
             soundfile.write,
             f"{self.temp_dir}/{title}_compiled.wav",
-            audio[start_index:],
+            audio[:, start_index:],
             44100,
         )
 

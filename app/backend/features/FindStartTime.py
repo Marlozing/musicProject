@@ -58,16 +58,15 @@ async def find_time(origin_audio, reaction_audio):
         np.abs(reaction_audio)
     )
 
-    for i in range(2):
-        # MFCC 특징 추출
-        mfcc_origin = librosa.feature.mfcc(
-            y=compiled_origin[i], sr=44100, n_mfcc=13
-        )
-        mfcc_reaction = librosa.feature.mfcc(
-            y=compiled_reaction[i], sr=44100, n_mfcc=13
-        )
-        best_index = await hyper_dtw(mfcc_origin, mfcc_reaction, param_grid)
-        print(best_index)
+    # MFCC 특징 추출
+    mfcc_origin = librosa.feature.mfcc(
+        y=compiled_origin, sr=44100, n_mfcc=13
+    )
+    mfcc_reaction = librosa.feature.mfcc(
+        y=compiled_reaction, sr=44100, n_mfcc=13
+    )
+    best_index = await hyper_dtw(mfcc_origin, mfcc_reaction, param_grid)
+    print(best_index)
     return best_index
 
 
