@@ -1,5 +1,6 @@
 import React from 'react';
 import './MainPage.css'; // CSS 파일 가져오기
+import icon from './image.png'; // 이미지 파일 가져오기
 
 const Menu = () => {
     return (
@@ -8,7 +9,7 @@ const Menu = () => {
                 <tbody>
                     <tr className="a1" bgcolor="black">
                         <td>
-                            < img src="image.png" alt="Example" style={{ float: 'left' }} />
+                            < img src={icon} alt="Icon" style={{ float: 'left' }} />
                         </td>
                         <td></td>
                         <td></td>

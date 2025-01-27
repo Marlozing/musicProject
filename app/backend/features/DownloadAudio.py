@@ -1,22 +1,25 @@
 import asyncio
 import os
-import sqlite3
 import subprocess
-from tempfile import TemporaryDirectory
 import sqlite3
 import time
 import warnings
-
+import json
+import threading
 import librosa
 import numpy as np
 import soundfile
+import requests
+import zipfile
+
+from tempfile import TemporaryDirectory
 from bs4 import BeautifulSoup as bs
 from pytubefix import YouTube
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+from dotenv import load_dotenv
 
 from .FindStartTime import find_time
+from ... import socketio
+from flask_socketio import emit
 
 # region 특정 경고 무시
 warnings.filterwarnings("ignore", category=UserWarning, message="PySoundFile failed.*")
@@ -26,63 +29,13 @@ warnings.filterwarnings(
 # endregion
 
 
-# region 폴더 정리
-def clear_folder(path: str):
-    if not os.path.exists(path):
-        os.makedirs(path)  # 폴더가 없으면 생성
-    else:
-        for filename in os.listdir(path):
-            file_path = os.path.join(path, filename)
-            if os.path.isfile(file_path):
-                os.remove(file_path)  # 파일 삭제
-
-
-# endregion
-
-
-# region 로그인
-def login(naver_id: str, naver_pw: str):
-    options = webdriver.ChromeOptions()
-    options.add_argument("--headless")  # Headless 모드
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-
-    driver = webdriver.Remote(
-        command_executor="http://localhost:4444/wd/hub", options=options
-    )
-
-    login_url = "https://nid.naver.com/nidlogin.login"
-
-    driver.get(login_url)  # 로그인 페이지 열기
-    driver.implicitly_wait(2)  # 로드 대기
-
-    driver.execute_script(
-        f"document.getElementsByName('id')[0].value='{naver_id}'"
-    )  # ID 입력
-    driver.execute_script(
-        f"document.getElementsByName('pw')[0].value='{naver_pw}'"
-    )  # 비밀번호 입력
-    driver.find_element(
-        by=By.XPATH, value='//*[@id="log.login"]'
-    ).click()  # 로그인 버튼 클릭
-    time.sleep(1)  # 잠시 대기
-
-    return driver
-
-
-# endregion
-
-
 # region 유튜브 URL 변환
-def change_to_youtube_url(source: str) -> str:
-    video_id = (
-        source.split("src=")[1]
-        .split('"')[1]
-        .replace("\\", "")
-        .split("/")[-1]
-        .split("?")[0]
-    )  # 비디오 ID 추출
-    return f"https://www.youtube.com/watch?v={video_id}"  # 유튜브 URL 반환
+def change_to_youtube_url(embed_url: str) -> str:
+    # URL에서 비디오 ID 추출
+    video_id = embed_url.split("/")[-1].split("?")[0]
+    # 일반 링크 형식으로 변환
+    watch_url = f"https://www.youtube.com/watch?v={video_id}"
+    return watch_url
 
 
 # endregion
@@ -116,6 +69,7 @@ def get_viewer(author: str, title: str) -> str:
         for name in names:
             if name in title.split(" ")[0]:  # 제목의 첫 단어와 비교
                 wav_path = title.split(" ")[0]  # 첫 단어를 경로로 설정
+                break
 
     if author in authors:
         wav_path = authors[author]
@@ -147,16 +101,50 @@ def process_title(title: str):
 
 class DownloadAudio:
     # region 초기화
-    def __init__(self, data: dict):
-        self.url = data["link"]
-        self.reactions = data["reactions"]
-        db_conn = sqlite3.connect("./database/posted_link.db")
-        db_cur = db_conn.cursor()
-        db_cur.execute("SELECT * FROM posted_link ORDER BY link DESC")
-        self.db_list = db_cur.fetchall()
-        db_conn.close()
+    def __init__(self):
+        load_dotenv("crawl.env")
+
         self.temp_dir = TemporaryDirectory().name
         self.origin_audio = None
+
+    # endregion
+
+    # region 진행 상황 출력
+    async def print_progress(self, message):
+        socketio.emit("test", {"message": message})
+
+    # endregion
+
+    # region 유튜브 링크 가져오기
+    async def get_html(self, article_id: str):
+        url = f"{os.getenv('NAVER_CAFE_HTML_API')}/{os.getenv('NAVER_CAFE_ID')}/articles/{article_id}?useCafeId=false"
+        response = requests.get(url)
+        data = response.json()
+        # HTML 파싱
+        title = data["result"]["article"]["subject"]
+        soup = bs(data["result"]["article"]["contentHtml"], "html.parser")
+
+        # '__se_module_data' 클래스를 가진 모든 스크립트 태그 찾기
+        datas = soup.find_all(class_="__se_module_data")
+
+        youtube_links = []
+        for data in datas:
+            # data-module 속성에서 JSON 데이터 추출
+            module_data = data.get("data-module")
+            if module_data:
+                a = json.loads(module_data)["data"]
+                if a.get("html") is None:
+                    continue
+
+                # HTML 내용에서 <iframe> 태그 추출
+                iframe_html = a["html"]
+                iframe_soup = bs(iframe_html, "html.parser")
+                iframe = iframe_soup.find("iframe")
+
+                # src 속성 추출
+                if iframe and "src" in iframe.attrs:
+                    youtube_links.append(change_to_youtube_url(iframe["src"]))
+        return title, youtube_links
 
     # endregion
 
@@ -170,8 +158,12 @@ class DownloadAudio:
         try:
             video_stream.download(output_path=self.temp_dir, filename=f"{title}.mp4")
             audio_stream.download(output_path=self.temp_dir, filename=f"{title}.wav")
-        except:
+
+            await self.print_progress(f"Downloaded {title}")
+            print(f"Downloaded {title}")
+        except Exception as e:
             print(f"Error: {title}")
+            print(e)
             return
 
     # endregion
@@ -179,17 +171,19 @@ class DownloadAudio:
     # region 동영상 파일 시간 조정
     async def adjust_audio_start_time(self, title: str, output_path: str = "../video"):
         audio, _ = await asyncio.to_thread(
-            librosa.load, f"{self.temp_dir}/{title}.wav", sr=None
+            librosa.load, f"{self.temp_dir}/{title}.wav", sr=None, mono=True
         )
         start_index = await find_time(self.origin_audio, audio) * 512
         start_time = start_index / 44100
 
         await asyncio.to_thread(
             soundfile.write,
-            f"{self.temp_dir}/{title}.wav",
+            f"{self.temp_dir}/{title}_compiled.wav",
             audio[start_index:],
             44100,
         )
+
+        print(f"{title} Start time: {start_time}")
 
         command = [
             "ffmpeg",
@@ -212,63 +206,53 @@ class DownloadAudio:
             "-i",
             f"{self.temp_dir}/{title}_compiled.mp4",
             "-i",
-            f"{self.temp_dir}/{title}.wav",
+            f"{self.temp_dir}/{title}_compiled.wav",
             "-c:v",
             "copy",
             "-c:a",
             "aac",
             "-strict",
             "experimental",
-            f"{output_path}/{title}.mp4",
+            f"{output_path}/final_{title}.mp4",
         ]
 
         await asyncio.to_thread(
             subprocess.run, command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
 
+        await self.print_progress(f"Adjusted {title}")
+        print(f"Adjusted {title}")
+
+    # endregion
+
+    # region ZIP 파일 생성
+    async def create_zip(self, output_path: str, zip_name: str):
+        zip_path = os.path.join(output_path, zip_name)
+        with zipfile.ZipFile(zip_path, "w") as zipf:
+            for root, _, files in os.walk(self.temp_dir):
+                for file in files:
+                    if file.split("_")[0] == "final":
+                        file_path = os.path.join(root, file)
+                        zipf.write(file_path, os.path.relpath(file_path, output_path))
+        return zip_path
+
     # endregion
 
     # region 오디오 다운로드 함수
-    async def download_audio(self, naver_id: str, naver_pw: str):
-        youtube_links = []
+    async def download_audio(self, url_id: str):
+
+        # region 파일 있는지 확인
+        if os.path.exists(f"./video/{url_id}.zip"):
+            return
+        # endregion
+
         download_tasks = []
         adjust_tasks = []
-        download_path = "../video"
+        download_path = "./video"
 
-        # region 기존 파일 삭제
-        clear_folder(download_path)
-        # endregion
-
-        # region 크롤링
-        browser = login(naver_id, naver_pw)
-
-        browser.get(self.url)
-
-        time.sleep(2)
-
-        browser.switch_to.frame("cafe_main")
-        soup = bs(browser.page_source, "html.parser")
-        title = soup.find_all(class_="title_text")[0].text
-        if process_title(title)[1] != self.reactions:
-            db_conn = sqlite3.connect("./database/posted_link.db")
-            db_conn.execute(
-                "UPDATE posted_link SET title = ? WHERE link = ?",
-                (title, self.url),
-            )
-            db_conn.commit()
-
-        datas = soup.find_all(
-            class_="se-component se-oembed se-l-default __se-component"
-        )
-        # endregion
-
-        # region 유튜브 링크 가져오기
-        for data in datas:
-            data = data.find_all_next(class_="__se_module_data")[0]
-            watch_url = change_to_youtube_url(str(data))
-            youtube_links.append(watch_url)
-        browser.quit()
-        # endregion
+        current_title, youtube_links = await self.get_html(
+            url_id
+        )  # 유튜브 링크 가져오기
 
         # region 에러 처리
         if len(youtube_links) == 0:
@@ -276,13 +260,30 @@ class DownloadAudio:
             return
         # endregion
 
+        # region 제목 비교 및 업데이트
+        db_conn = sqlite3.connect("./database/posted_link.db")
+        db_cur = db_conn.cursor()
+        db_cur.execute("SELECT title FROM posted_link WHERE link = ?", (url_id,))
+        past_title = db_cur.fetchone()
+
+        if current_title != past_title[0]:
+            db_cur.execute(
+                "UPDATE posted_link SET title = ? WHERE link = ?",
+                (current_title, url_id),
+            )
+            db_conn.commit()
+        db_conn.close()
+        # endregion
+
         # region 유튜브 영상 다운로드
         youtubes_dict = {}
         for link in youtube_links:
             try:
-                yt = YouTube(link)
+                yt = YouTube(link, use_po_token=True)
                 youtubes_dict[get_viewer(yt.author, yt.title)] = yt
-            except:
+            except Exception as e:
+                print(f"Error: {link}")
+                print(e)
                 pass
 
         default_video_name = "원본"
@@ -305,26 +306,28 @@ class DownloadAudio:
             "aac",
             "-strict",
             "experimental",
-            f"{download_path}/원본.mp4",
+            f"{self.temp_dir}/final_원본.mp4",
         ]
 
         subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         # endregion
 
         if len(youtubes_dict) == 0:
+            print("No videos to download")
             return
 
         self.origin_audio, _ = librosa.load(
             f"{self.temp_dir}/원본.wav", sr=None, mono=True
         )
-
+        print("Origin audio loaded")
         # region 다운로드 및 시간 조정
         for key in youtubes_dict.keys():
-            download_tasks.append(self.download_youtube(youtubes_dict[key], key))
-            adjust_tasks.append(self.adjust_audio_start_time(key, download_path))
+            await self.download_youtube(youtubes_dict[key], key)
+        for key in youtubes_dict.keys():
+            await self.adjust_audio_start_time(key, self.temp_dir)
 
-        await asyncio.gather(*download_tasks)
-        await asyncio.gather(*adjust_tasks)
+        await self.create_zip(download_path, f"{url_id}.zip")
+
         # endregion
 
         # endregion

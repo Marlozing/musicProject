@@ -42,3 +42,11 @@ th, td {
   padding: 10px 20px; /* 패딩 추가 */
   text-decoration: none; /* 링크 밑줄 제거 */
 }
+
+.list {
+  font-weight: bold;
+  font-size: 40px; /* 텍스트 크기 */
+  position: absolute;
+  left: 50%;
+  transform: translate(-58%, 0); /* 가로 중앙 정렬 */
+}
