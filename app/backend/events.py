@@ -1,14 +1,18 @@
 import asyncio
 import os
 import sqlite3
+import time
+import json
+import re
 
-from flask import request, jsonify
-from flask_socketio import emit, SocketIO
-from dotenv import load_dotenv
+from flask import request, jsonify, send_file
+from flask_socketio import join_room, leave_room, emit
 
 from . import main
 from .features import *
 from .. import socketio
+
+down_task_id = 0
 
 async def fetch_data():
     if not os.path.exists("./database/posted_link.db"):
@@ -22,36 +26,39 @@ async def fetch_data():
 
     title_dict = {}
     for item in db_list:
-        title_dict[item[0]] = process_title(item[1])
+        s = process_title(item[1])
+        if not bool(re.search(r"[가-힣A-Za-z]", s[1])):
+            title_dict[item[0]] = s
 
     return title_dict
 
+def run_async_task(coro):
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
 
-@main.route("/refresh", methods=["POST"])
+@socketio.on("refresh")
 def get_refresh():
-    asyncio.run(CrawlService().check_new_posts(10))
-    data = asyncio.run(fetch_data())
-    trigger_refresh()
-    return jsonify({"message": "Signal received", "data": data}), 200
-
+    run_async_task(CrawlService().check_new_posts(10))
+    socketio.emit("refresh", {"message": "Please refresh the page!"})
 
 @main.route("/data", methods=["GET"])
 def send_data():
-    data = asyncio.run(fetch_data())
+    data = run_async_task(fetch_data())
     return jsonify(data)
 
-@main.route("/trigger_refresh", methods=["POST"])
-def trigger_refresh():
-    socketio.emit("refresh", {"message": "Please refresh the page!"})
-    return "Refresh signal sent!", 200
+@main.route("/download/<zip_name>", methods=["GET"])
+def download_zip(zip_name):
+    zip_path = os.path.join(os.path.abspath("./video"), zip_name)
+    return send_file(zip_path, as_attachment=True)
 
+@socketio.on("download_signal")
+def handle_signal(data):
+    run_async_task(download_video(data))
+    socketio.emit("done", {"message": "Signal received"})
 
-@main.route("/signal", methods=["POST"])
-def get_signal():
-    data = request.get_json()
-    load_dotenv("crawl.env")
-    asyncio.create_task(
-        DownloadAudio(data).download_audio(os.getenv("NAVER_ID"), os.getenv("NAVER_PW"))
-    )
-    socketio.emit("done", {"message": "Successfully downloaded!"})
-    return "Signal received", 200
+async def download_video(data):
+    await DownloadAudio().download_audio(data)

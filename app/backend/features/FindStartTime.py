@@ -4,7 +4,7 @@ import ray
 from sklearn.model_selection import ParameterGrid
 
 # region ray 초기화
-ray.init(object_store_memory=5 * 1024 * 1024 * 1024)
+ray.init()
 # endregion
 
 
@@ -48,23 +48,26 @@ def compute_dtw(mfcc_1, mfcc_2_slice):
 
 
 # region 오디오 시간 찾기
-async def find_time(audio1, audio2):
+async def find_time(origin_audio, reaction_audio):
+
+
     param_grid = {}
-
-    compiled_audio1 = audio1[: 20 * 44100] / np.max(np.abs(audio1))
-    compiled_audio2 = audio2[: 2 * 60 * 44100] / np.max(
-        np.abs(audio2)
+    best_index = 0
+    compiled_origin = origin_audio[: 20 * 44100] / np.max(np.abs(origin_audio))
+    compiled_reaction = reaction_audio[: 2 * 60 * 44100] / np.max(
+        np.abs(reaction_audio)
     )
 
-    # MFCC 특징 추출
-    mfcc_1 = librosa.feature.mfcc(
-        y=compiled_audio1, sr=44100, n_mfcc=13
-    )
-    mfcc_2 = librosa.feature.mfcc(
-        y=compiled_audio2, sr=44100, n_mfcc=13
-    )
-    best_index = await hyper_dtw(mfcc_1, mfcc_2, param_grid)
-
+    for i in range(2):
+        # MFCC 특징 추출
+        mfcc_origin = librosa.feature.mfcc(
+            y=compiled_origin[i], sr=44100, n_mfcc=13
+        )
+        mfcc_reaction = librosa.feature.mfcc(
+            y=compiled_reaction[i], sr=44100, n_mfcc=13
+        )
+        best_index = await hyper_dtw(mfcc_origin, mfcc_reaction, param_grid)
+        print(best_index)
     return best_index
 
 

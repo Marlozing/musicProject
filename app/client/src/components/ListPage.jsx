@@ -1,50 +1,37 @@
 import React, { useEffect, useState } from 'react';
 import Menu from './Menu.jsx';
-import { io } from 'socket.io-client';
-
-const socket = io('http://localhost:5000');
+import { socket } from "../socket";
+import { useNavigate } from "react-router-dom";
 
 const ListPage = () => {
     const [items, setItems] = useState({});
-
+    const navigate = useNavigate();
     useEffect(() => {
+
         fetch('/api/data')  // Flask API call
             .then(response => response.json())
             .then(data => setItems(data))
             .catch(error => console.error('Error fetching data:', error));
-    }, []);
 
-    useEffect(() => {
         // Listen for refresh signal from server
         socket.on('refresh', () => {
-            console.log("Refresh signal received from server");
             window.location.reload();  // Refresh the page
+        });
+
+        socket.on('disconnect', () => {
+            navigate('/error'); // Navigate to error page on disconnect
         });
 
         return () => {
             socket.off('refresh'); // Clean up event listener on component unmount
+            socket.off('disconnect');
         };
-    }, []);
 
-    const handleButtonClick = (key, value) => {
-        window.location.href = "/loading";
-        // Send POST request to API
-        fetch('/api/signal', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ "link": key, "reactions": value }), // Data to send: key, title
-        })
-        .then(response => {
-            if (response.ok) {
-                return response.json();
-            }
-            throw new Error('Network response was not ok.');
-        })
-        .catch(error => {
-            console.error('Error:', error);
-        });
+    }, [navigate]);
+
+    const handleButtonClick = (key) => {
+        socket.emit('download_signal', key); // Send key to server
+        navigate(`/loading/` + key); // Navigate to loading page
     };
 
     return (
@@ -55,21 +42,7 @@ const ListPage = () => {
                     style={{ width: '100%', height: '4vh', fontSize: '1.6em' }}
                     onClick={() => {
                         // Send POST request to API
-                        fetch('/api/refresh', {
-                            method: 'POST',
-                        })
-                        .then(response => {
-                            if (response.ok) {
-                                return response.json();
-                            }
-                            throw new Error('Network response was not ok.');
-                        })
-                        .then(data => {
-                            console.log(data.message); // Log response message
-                        })
-                        .catch(error => {
-                            console.error('Error:', error);
-                        });
+                        socket.emit('refresh');
                     }}
                 >
                     크롤링하기
@@ -79,7 +52,7 @@ const ListPage = () => {
                 <div style={{ display: 'flex', justifyContent: 'center' }} key={key}>
                     <button
                         style={{ width: '150%', fontSize: '1.6em' }}
-                        onClick={() => handleButtonClick(key, value[1])} // Send key on button click
+                        onClick={() => handleButtonClick(key)} // Send key on button click
                     >
                         {value[0]}
                     </button>
