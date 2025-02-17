@@ -71,7 +71,7 @@ def get_viewer(author: str, title: str) -> str:
                 wav_path = title.split(" ")[0]  # 첫 단어를 경로로 설정
                 break
 
-    if author in authors:
+    if author in authors and "반응" in title:
         wav_path = authors[author]
 
     return wav_path  # 최종 이름 반환
@@ -82,6 +82,7 @@ def get_viewer(author: str, title: str) -> str:
 
 # region 제목 처리
 def process_title(title: str):
+
     if "했어요]" in title:
         splited_title = title.split("했어요]")[1].replace(" 반응정리", "").split("/")
     else:
@@ -92,6 +93,7 @@ def process_title(title: str):
 
     viewer = viewer.replace("💙", "🩵")
     viewer = viewer.replace("🖤", "💙")
+
 
     return [final_title, viewer]
 
@@ -106,12 +108,16 @@ class DownloadAudio:
 
         self.temp_dir = TemporaryDirectory().name
         self.origin_audio = None
+        self.download_path = "./video"
+        self.music_title = "음악"
 
     # endregion
 
     # region 진행 상황 출력
     async def print_progress(self, message):
-        socketio.emit("test", {"message": message})
+        socketio.emit("progress_update", {"message": message})
+        print(message)
+        socketio.sleep(0)
 
     # endregion
 
@@ -160,7 +166,6 @@ class DownloadAudio:
             audio_stream.download(output_path=self.temp_dir, filename=f"{title}.wav")
 
             await self.print_progress(f"Downloaded {title}")
-            print(f"Downloaded {title}")
         except Exception as e:
             print(f"Error: {title}")
             print(e)
@@ -179,11 +184,9 @@ class DownloadAudio:
         await asyncio.to_thread(
             soundfile.write,
             f"{self.temp_dir}/{title}_compiled.wav",
-            audio[:, start_index:],
+            audio[:, start_index:].T,
             44100,
         )
-
-        print(f"{title} Start time: {start_time}")
 
         command = [
             "ffmpeg",
@@ -221,7 +224,6 @@ class DownloadAudio:
         )
 
         await self.print_progress(f"Adjusted {title}")
-        print(f"Adjusted {title}")
 
     # endregion
 
@@ -233,7 +235,10 @@ class DownloadAudio:
                 for file in files:
                     if file.split("_")[0] == "final":
                         file_path = os.path.join(root, file)
-                        zipf.write(file_path, os.path.relpath(file_path, output_path))
+
+                        # ZIP 내부에 경로 없이 파일 이름만 추가
+                        zipf.write(file_path, arcname=file)
+
         return zip_path
 
     # endregion
@@ -241,14 +246,10 @@ class DownloadAudio:
     # region 오디오 다운로드 함수
     async def download_audio(self, url_id: str):
 
-        # region 파일 있는지 확인
+        # region 이미 처리된 파일 있는지 확인
         if os.path.exists(f"./video/{url_id}.zip"):
             return
         # endregion
-
-        download_tasks = []
-        adjust_tasks = []
-        download_path = "./video"
 
         current_title, youtube_links = await self.get_html(
             url_id
@@ -286,13 +287,15 @@ class DownloadAudio:
                 print(e)
                 pass
 
-        default_video_name = "원본"
+        default_name = "원본"
         if not "원본" in youtubes_dict.keys():
-            default_video_name = list(youtubes_dict.keys())[0]
+            await self.print_progress("No original video")
+            await self.print_progress(f"Use {list(youtubes_dict.keys())[0]} as default")
+            default_name = list(youtubes_dict.keys())[0]
 
         # region 원본 영상 처리
-        await self.download_youtube(youtubes_dict[default_video_name], "원본")
-        del youtubes_dict[default_video_name]
+        await self.download_youtube(youtubes_dict[default_name], "원본")
+        del youtubes_dict[default_name]
 
         command = [
             "ffmpeg",
@@ -313,20 +316,19 @@ class DownloadAudio:
         # endregion
 
         if len(youtubes_dict) == 0:
-            print("No videos to download")
+            await self.print_progress("No reaction video")
             return
 
         self.origin_audio, _ = librosa.load(
             f"{self.temp_dir}/원본.wav", sr=None, mono=True
         )
-        print("Origin audio loaded")
         # region 다운로드 및 시간 조정
         for key in youtubes_dict.keys():
             await self.download_youtube(youtubes_dict[key], key)
         for key in youtubes_dict.keys():
             await self.adjust_audio_start_time(key, self.temp_dir)
 
-        await self.create_zip(download_path, f"{url_id}.zip")
+        await self.create_zip(self.download_path, f"{url_id}.zip")
 
         # endregion
 

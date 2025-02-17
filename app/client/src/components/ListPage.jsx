@@ -1,66 +1,69 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import Menu from './Menu.jsx';
 import { socket } from "../socket";
 import { useNavigate } from "react-router-dom";
+import Twemoji from 'react-twemoji';
+import "./ListPage.css";
+
 
 const ListPage = () => {
     const [items, setItems] = useState({});
     const navigate = useNavigate();
-    useEffect(() => {
 
-        fetch('/api/data')  // Flask API call
+    // 데이터 가져오는 함수
+    const fetchData = useCallback(() => {
+        fetch("/api/data")
             .then(response => response.json())
             .then(data => setItems(data))
-            .catch(error => console.error('Error fetching data:', error));
+            .catch(error => console.error("Error fetching data:", error));
+    }, []);
 
-        // Listen for refresh signal from server
-        socket.on('refresh', () => {
-            window.location.reload();  // Refresh the page
-        });
+    // 페이지 마운트 시 데이터 로드 및 소켓 이벤트 리스너 설정
+    useEffect(() => {
+        fetchData();
 
-        socket.on('disconnect', () => {
-            navigate('/error'); // Navigate to error page on disconnect
-        });
+        const handleRefresh = () => window.location.reload();
+        const handleDisconnect = () => navigate("/error");
+
+        socket.on("refresh", handleRefresh);
+        socket.on("disconnect", handleDisconnect);
 
         return () => {
-            socket.off('refresh'); // Clean up event listener on component unmount
-            socket.off('disconnect');
+            socket.off("refresh", handleRefresh);
+            socket.off("disconnect", handleDisconnect);
         };
+    }, [fetchData, navigate]);
 
-    }, [navigate]);
-
+    // 버튼 클릭 핸들러
     const handleButtonClick = (key) => {
-        socket.emit('download_signal', key); // Send key to server
-        navigate(`/loading/` + key); // Navigate to loading page
+        socket.emit("download_signal", key);
+        navigate(`/loading/${key}`);
     };
 
     return (
         <div className="main-container">
-            <Menu />
-            <div style={{ display: 'flex', justifyContent: 'center' }}>
-                <button
-                    style={{ width: '100%', height: '4vh', fontSize: '1.6em' }}
-                    onClick={() => {
-                        // Send POST request to API
-                        socket.emit('refresh');
-                    }}
-                >
+            <Menu/>
+            <div className="container">
+                <button className={'crawl-button'} onClick={() => {
+                    socket.emit('refresh');
+                }}>
                     크롤링하기
                 </button>
             </div>
-            {Object.entries(items).map(([key, value]) => (
-                <div style={{ display: 'flex', justifyContent: 'center' }} key={key}>
-                    <button
-                        style={{ width: '150%', fontSize: '1.6em' }}
-                        onClick={() => handleButtonClick(key)} // Send key on button click
-                    >
-                        {value[0]}
-                    </button>
-                    <div style={{ width: '50%', fontSize: '1.6em', textAlign: 'left', border: '1px solid black' }}>
-                        {value[1]}
+            {Object.entries(items)
+                .reverse()
+                .map(([key, value]) => (
+                    <div className="container" key={key}>
+                        <button className="action-button" onClick={() => handleButtonClick(key)}>
+                            {value[0]}
+                        </button>
+                        <div className="emoji-box">
+                            <Twemoji options={{className: 'custom-twemoji'}}>
+                                {value[1]}
+                            </Twemoji>
+                        </div>
                     </div>
-                </div>
-            )).reverse()}
+                ))}
         </div>
     );
 };
