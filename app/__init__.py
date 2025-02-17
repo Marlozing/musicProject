@@ -2,11 +2,11 @@ from flask import Flask
 from flask_cors import CORS
 from flask_socketio import SocketIO
 
-socketio = SocketIO(cors_allowed_origins=["121.143.26.180:3000","http://localhost:3000", "http://127.0.0.1:3000"], ping_timeout=600, ping_interval=25, async_mode='eventlet')
+socketio = SocketIO(cors_allowed_origins="*", ping_timeout=600, ping_interval=25, async_mode='eventlet')
 
 def create_app(debug=False):
     app = Flask(__name__)
-    CORS(app, resources={r"/*": {"origins": ["121.143.26.180:3000","http://localhost:3000", "http://127.0.0.1:3000"]}})
+    CORS(app, resources=(r"/api/*", {"origins": "*"}))
     app.debug = debug
 
     from .backend import main as main_blueprint
