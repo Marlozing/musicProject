@@ -5,18 +5,19 @@ import time
 import json
 import re
 
-from flask import request, jsonify, send_file
-from flask_socketio import join_room, leave_room, emit
+from flask import jsonify, send_file, send_from_directory, Blueprint
+from flask_socketio import SocketIO
 
-from . import main
-from .features import *
-from .. import socketio
+from features import *
+
+main = Blueprint('main', __name__, url_prefix="")
+socketio = SocketIO(cors_allowed_origins="*", ping_timeout=600, ping_interval=25, async_mode='eventlet')
 
 async def fetch_data():
-    if not os.path.exists("./database/posted_link.db"):
+    if not os.path.exists("../database/posted_link.db"):
         await CrawlService().checkForNewPosts(100)
 
-    db_conn = sqlite3.connect("./database/posted_link.db")
+    db_conn = sqlite3.connect("../database/posted_link.db")
     db_cur = db_conn.cursor()
     db_cur.execute("SELECT * FROM posted_link ORDER BY link DESC")
     db_list = db_cur.fetchall()
@@ -45,26 +46,26 @@ def get_refresh():
     socketio.emit("refresh", {"message": "Please refresh the page!"})
 
 # 데이터 요청 이벤트
-@main.route("/data", methods=["GET"])
+@main.route("/api/data", methods=["GET"])
 def send_data():
     data = run_async_task(fetch_data())
     return jsonify(data)
 
 # 다운로드 이벤트
-@main.route("/download/<zip_name>", methods=["GET"])
+@main.route("/api/download/<zip_name>", methods=["GET"])
 def download_zip(zip_name):
-    zip_path = os.path.join(os.path.abspath("./video"), zip_name)
+    zip_path = os.path.join(os.path.abspath("../video"), zip_name)
     if os.path.exists(zip_path):
         return send_file(zip_path, as_attachment=True, mimetype="application/zip")
     else:
         return jsonify({"message": "File not found"})
 
 # 파일 삭제 이벤트
-@main.route('/delete/<filename>', methods=['DELETE'])
+@main.route('/api/delete/<filename>', methods=['DELETE'])
 def delete_file(filename):
     try:
         # 파일 삭제 처리
-        file_path = os.path.join('./video', filename)
+        file_path = os.path.join('../video', filename)
         if os.path.exists(file_path):
             os.remove(file_path)
             return jsonify({'message': f'{filename} deleted successfully'}), 200
@@ -76,10 +77,8 @@ def delete_file(filename):
 # 다운로드 신호 이벤트
 @socketio.on("download_signal")
 def handle_signal(data):
-    print(data)
     run_async_task(download_video(data))
-    print(data)
     socketio.emit("done", {"message": "Signal received"})
 
 async def download_video(data):
-    await DownloadAudio().download_audio(data)
+    await DownloadAudio(socketio).download_audio(data)

@@ -18,7 +18,6 @@ from pytubefix import YouTube
 from dotenv import load_dotenv
 
 from .FindStartTime import find_time
-from ... import socketio
 from flask_socketio import emit
 
 # region 특정 경고 무시
@@ -103,21 +102,21 @@ def process_title(title: str):
 
 class DownloadAudio:
     # region 초기화
-    def __init__(self):
+    def __init__(self, socketio):
         load_dotenv("crawl.env")
 
+        self.socketio = socketio
         self.temp_dir = TemporaryDirectory().name
         self.origin_audio = None
-        self.download_path = "./video"
+        self.download_path = "../video"
         self.music_title = "음악"
 
     # endregion
 
     # region 진행 상황 출력
     async def print_progress(self, message):
-        socketio.emit("progress_update", {"message": message})
-        print(message)
-        socketio.sleep(0)
+        self.socketio.emit("progress_update", {"message": message})
+        self.socketio.sleep(0)
 
     # endregion
 
@@ -246,11 +245,6 @@ class DownloadAudio:
     # region 오디오 다운로드 함수
     async def download_audio(self, url_id: str):
 
-        # region 이미 처리된 파일 있는지 확인
-        if os.path.exists(f"./video/{url_id}.zip"):
-            return
-        # endregion
-
         current_title, youtube_links = await self.get_html(
             url_id
         )  # 유튜브 링크 가져오기
@@ -262,7 +256,7 @@ class DownloadAudio:
         # endregion
 
         # region 제목 비교 및 업데이트
-        db_conn = sqlite3.connect("./database/posted_link.db")
+        db_conn = sqlite3.connect("../database/posted_link.db")
         db_cur = db_conn.cursor()
         db_cur.execute("SELECT title FROM posted_link WHERE link = ?", (url_id,))
         past_title = db_cur.fetchone()
@@ -280,7 +274,7 @@ class DownloadAudio:
         youtubes_dict = {}
         for link in youtube_links:
             try:
-                yt = YouTube(link, use_po_token=True)
+                yt = YouTube(link)
                 youtubes_dict[get_viewer(yt.author, yt.title)] = yt
             except Exception as e:
                 print(f"Error: {link}")
