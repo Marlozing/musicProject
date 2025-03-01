@@ -2,10 +2,9 @@ from flask import Flask
 from flask_cors import CORS
 from flask_socketio import SocketIO
 
-socketio = SocketIO(cors_allowed_origins="*", ping_timeout=600, ping_interval=25, async_mode='eventlet')
-
-def create_app(debug=False):
-    app = Flask(__name__)
+if __name__ == "__main__":
+    socketio = SocketIO(cors_allowed_origins="*", ping_timeout=600, ping_interval=25, async_mode='eventlet')
+    app = Flask(__name__, static_folder="./frontend/build")
     CORS(app, resources=(r"/api/*", {"origins": "*"}))
     app.debug = debug
 
@@ -14,4 +13,6 @@ def create_app(debug=False):
     app.register_blueprint(main_blueprint)
 
     socketio.init_app(app)
-    return app
+
+    app = create_app(debug=True)
+    socketio.run(app, host="0.0.0.0", port=5000, allow_unsafe_werkzeug=True)

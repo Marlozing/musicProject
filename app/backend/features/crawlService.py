@@ -10,7 +10,7 @@ class CrawlService:
         self.transport = AsyncHTTPTransport(retries=1)
 
         # 유저의 게시물 링크를 저장할 DB
-        self.db_conn = sqlite3.connect("./database/posted_link.db")
+        self.db_conn = sqlite3.connect("../database/posted_link.db")
 
         load_dotenv("crawl.env")
     async def check_new_posts(self, max_page: int):
