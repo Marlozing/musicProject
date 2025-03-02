@@ -152,7 +152,7 @@ class DownloadAudio:
 
         self.youtubes_dict = {}
         self.origin_audio = None
-        self.download_path = "../video"
+        self.download_path = "./video"
         self.music_title = "음악"
 
     # endregion
