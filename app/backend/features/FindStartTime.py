@@ -52,7 +52,6 @@ async def find_time(origin_audio, reaction_audio):
 
 
     param_grid = {}
-    best_index = 0
     compiled_origin = origin_audio[: 20 * 44100] / np.max(np.abs(origin_audio))
     compiled_reaction = reaction_audio[: 2 * 60 * 44100] / np.max(
         np.abs(reaction_audio)

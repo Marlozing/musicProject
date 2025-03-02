@@ -16,6 +16,12 @@ const LoadingPage = () => {
             setMessages(prevMessages => [...prevMessages, data.message]);
         });
 
+        // 오류 발생 시 메시지 출력 후 목록 페이지로 이동
+        socket.on('error', (data) => {
+            alert(data.message);
+            navigate('/list');
+        });
+
         // 다운로드 완료 이벤트 처리
         socket.on("done", async () => {
             setLoadingText("다운로드 완료");

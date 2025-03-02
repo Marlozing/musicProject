@@ -1,5 +1,6 @@
 import sqlite3
 import os
+
 from uuid import uuid4
 from httpx import AsyncClient, AsyncHTTPTransport
 from dotenv import load_dotenv
@@ -29,6 +30,7 @@ class CrawlService:
         # endregion
 
         async with AsyncClient(transport=self.transport) as client:
+
             # region 네이버 카페 게시물 가져오기
             response = await client.get(
                 os.getenv("NAVER_CAFE_ARTICLE_API")
@@ -63,13 +65,12 @@ class CrawlService:
                         "INSERT INTO posted_link (link, title) VALUES (?, ?)",
                         (article_id, str(article["subject"])),
                     )
-                else:
+                elif existing_title[0] != str(article["subject"]):
                     # 링크가 존재할 경우, 제목이 변경되었는지 확인
-                    if existing_title[0] != str(article["subject"]):
-                        db_cur.execute(
-                            "UPDATE posted_link SET title = ? WHERE link = ?",
-                            (str(article["subject"]), article_id),
-                        )
+                    db_cur.execute(
+                        "UPDATE posted_link SET title = ? WHERE link = ?",
+                        (str(article["subject"]), article_id),
+                    )
             # endregion
 
             self.db_conn.commit()
