@@ -17,10 +17,10 @@ socketio = SocketIO(
 
 
 async def fetch_data():
-    if not os.path.exists("../database/posted_link.db"):
+    if not os.path.exists("./database/posted_link.db"):
         await CrawlService().checkForNewPosts(100)
 
-    db_conn = sqlite3.connect("../database/posted_link.db")
+    db_conn = sqlite3.connect("./database/posted_link.db")
     db_cur = db_conn.cursor()
     db_cur.execute("SELECT * FROM posted_link ORDER BY link DESC")
     db_list = db_cur.fetchall()
@@ -55,7 +55,7 @@ def send_data():
 # 다운로드 이벤트
 @main.route("/download/<zip_name>", methods=["GET"])
 def download_zip(zip_name):
-    zip_path = os.path.join(os.path.abspath("../video"), zip_name)
+    zip_path = os.path.join(os.path.abspath("./video"), zip_name)
     if os.path.exists(zip_path):
         return send_file(zip_path, as_attachment=True, mimetype="application/zip")
     else:
@@ -67,7 +67,7 @@ def download_zip(zip_name):
 def delete_file(filename):
     try:
         # 파일 삭제 처리
-        file_path = os.path.join("../video", filename)
+        file_path = os.path.join("./video", filename)
         if os.path.exists(file_path):
             os.remove(file_path)
             return jsonify({"message": f"{filename} deleted successfully"}), 200
