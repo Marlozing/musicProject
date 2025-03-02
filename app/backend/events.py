@@ -10,8 +10,11 @@ from flask_socketio import SocketIO
 
 from features import *
 
-main = Blueprint('main', __name__, url_prefix="")
-socketio = SocketIO(cors_allowed_origins="*", ping_timeout=600, ping_interval=25, async_mode='eventlet')
+main = Blueprint("main", __name__, url_prefix="/api")
+socketio = SocketIO(
+    cors_allowed_origins="*", ping_timeout=600, ping_interval=25, async_mode="eventlet"
+)
+
 
 async def fetch_data():
     if not os.path.exists("../database/posted_link.db"):
@@ -24,12 +27,14 @@ async def fetch_data():
     db_conn.close()
 
     title_dict = {}
+
     for item in db_list:
         s = process_title(item[1])
         if not bool(re.search(r"[가-힣A-Za-z]", s[1])):
             title_dict[item[0]] = s
 
     return title_dict
+
 
 def run_async_task(coro):
     try:
@@ -39,20 +44,16 @@ def run_async_task(coro):
         asyncio.set_event_loop(loop)
     return loop.run_until_complete(coro)
 
-# 새로고침 이벤트
-@socketio.on("refresh")
-def get_refresh():
-    run_async_task(CrawlService().check_new_posts(10))
-    socketio.emit("refresh", {"message": "Please refresh the page!"})
 
 # 데이터 요청 이벤트
-@main.route("/api/data", methods=["GET"])
+@main.route("/data", methods=["GET"])
 def send_data():
     data = run_async_task(fetch_data())
     return jsonify(data)
 
+
 # 다운로드 이벤트
-@main.route("/api/download/<zip_name>", methods=["GET"])
+@main.route("/download/<zip_name>", methods=["GET"])
 def download_zip(zip_name):
     zip_path = os.path.join(os.path.abspath("../video"), zip_name)
     if os.path.exists(zip_path):
@@ -60,19 +61,28 @@ def download_zip(zip_name):
     else:
         return jsonify({"message": "File not found"})
 
+
 # 파일 삭제 이벤트
-@main.route('/api/delete/<filename>', methods=['DELETE'])
+@main.route("/delete/<filename>", methods=["DELETE"])
 def delete_file(filename):
     try:
         # 파일 삭제 처리
-        file_path = os.path.join('../video', filename)
+        file_path = os.path.join("../video", filename)
         if os.path.exists(file_path):
             os.remove(file_path)
-            return jsonify({'message': f'{filename} deleted successfully'}), 200
+            return jsonify({"message": f"{filename} deleted successfully"}), 200
         else:
-            return jsonify({'error': f'{filename} not found'}), 404
+            return jsonify({"error": f"{filename} not found"}), 404
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
+
+
+# 새로고침 이벤트
+@socketio.on("refresh")
+def get_refresh():
+    run_async_task(CrawlService().check_new_posts(10))
+    socketio.emit("refresh", {"message": "Please refresh the page!"})
+
 
 # 다운로드 신호 이벤트
 @socketio.on("download_signal")
@@ -80,5 +90,9 @@ def handle_signal(data):
     run_async_task(download_video(data))
     socketio.emit("done", {"message": "Signal received"})
 
+
 async def download_video(data):
-    await DownloadAudio(socketio).download_audio(data)
+    try:
+        await DownloadAudio(socketio).download_audio(data)
+    except Exception as e:
+        socketio.emit("error", {"message": e})
