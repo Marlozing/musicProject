@@ -5,16 +5,12 @@ import time
 import json
 import re
 
-from flask import jsonify, send_file, send_from_directory, Blueprint
-from flask_socketio import SocketIO
+from flask import jsonify, send_file, send_from_directory, Blueprint, request
 
 from features import *
 
 main = Blueprint("main", __name__, url_prefix="/api")
-socketio = SocketIO(
-    cors_allowed_origins="*", ping_timeout=600, ping_interval=25, async_mode="eventlet"
-)
-
+progress_list = []
 
 async def fetch_data():
     if not os.path.exists("./database/posted_link.db"):
@@ -78,21 +74,29 @@ def delete_file(filename):
 
 
 # 새로고침 이벤트
-@socketio.on("refresh")
+@main.route("/refresh", methods=["GET"])
 def get_refresh():
-    run_async_task(CrawlService().check_new_posts(10))
-    socketio.emit("refresh", {"message": "Please refresh the page!"})
+    try:
+        run_async_task(CrawlService().check_new_posts(10))
+        return jsonify({"message": "Refreshed successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # 다운로드 신호 이벤트
-@socketio.on("download_signal")
-def handle_signal(data):
-    run_async_task(download_video(data))
-    socketio.emit("done", {"message": "Signal received"})
+@main.route("/download_signal/<filename>")
+def handle_signal(filename):
+    if filename is None:
+        return jsonify({"error": "JSON 데이터가 올바르지 않습니다."}), 400
 
-
-async def download_video(data):
     try:
-        await DownloadAudio(socketio).download_audio(data)
+        run_async_task(DownloadAudio(progress_list).download_audio(filename))
+
     except Exception as e:
-        socketio.emit("error", {"message": e})
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({"message": "Downloaded successfully"}), 200
+
+@main.route("/progress", methods=["GET"])
+def get_progress():
+    return jsonify(progress_list)
