@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import Menu from './Menu.jsx';
-import { socket } from "../socket";
 import { useNavigate } from "react-router-dom";
 import Twemoji from 'react-twemoji';
 import "./ListPage.css";
@@ -18,34 +17,24 @@ const ListPage = () => {
             .catch(error => console.error("Error fetching data:", error));
     }, []);
 
-    // 페이지 마운트 시 데이터 로드 및 소켓 이벤트 리스너 설정
+    // 데이터 새로고침 함수
+    const refreshData = useCallback(() => {
+        fetch("/api/refresh")
+            .then(() => window.location.reload())
+            .catch(error => console.error("Error fetching data:", error));
+    }, []);
+
+
     useEffect(() => {
         fetchData();
-
-        const handleRefresh = () => window.location.reload();
-        const handleDisconnect = () => navigate("/error");
-
-        socket.on("refresh", handleRefresh);
-        socket.on("disconnect", handleDisconnect);
-
-        return () => {
-            socket.off("refresh", handleRefresh);
-            socket.off("disconnect", handleDisconnect);
-        };
-    }, [fetchData, navigate]);
-
-    // 버튼 클릭 핸들러
-    const handleButtonClick = (key) => {
-        socket.emit("download_signal", key);
-        navigate(`/loading/${key}`);
-    };
+    }, [fetchData]);
 
     return (
         <div className="main-container">
             <Menu/>
             <div className="container">
                 <button className={'crawl-button'} onClick={() => {
-                    socket.emit('refresh');
+                    refreshData()
                 }}>
                     크롤링하기
                 </button>
@@ -54,7 +43,7 @@ const ListPage = () => {
                 .reverse()
                 .map(([key, value]) => (
                     <div className="container" key={key}>
-                        <button className="action-button" onClick={() => handleButtonClick(key)}>
+                        <button className="action-button" onClick={() => navigate("/loading/" + key)}>
                             {value[0]}
                         </button>
                         <div className="emoji-box">

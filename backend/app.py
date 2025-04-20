@@ -5,16 +5,17 @@ from flask_cors import CORS
 from flask_socketio import SocketIO
 from dotenv import load_dotenv
 
-from events import main as main_blueprint, socketio
-
+from events import main as main_blueprint
 load_dotenv()
 
-app = Flask(__name__, static_folder="../frontend/build", template_folder="../frontend/build")
+app = Flask(__name__, static_folder="./build", template_folder="./build")
 app.config['SECRET_KEY'] = os.getenv("SECRECT_KEY")
 CORS(app)
-app.debug = False
+app.debug = True
+
 
 @app.route("/", defaults={"path": ""})
+
 @app.route("/<path:path>")
 def serve_react(path):
     if path != "" and os.path.exists(app.static_folder + "/" + path):
@@ -23,7 +24,7 @@ def serve_react(path):
         return send_from_directory(app.static_folder, "index.html")
 
 app.register_blueprint(main_blueprint)
-socketio.init_app(app)
+
 
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=5000)
+    Flask.run(app, host="0.0.0.0", port=5000)
