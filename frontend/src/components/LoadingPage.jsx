@@ -8,13 +8,13 @@ const LoadingPage = () => {
     const params = useParams();
     const [loadingText, setLoadingText] = useState("다운로드중");
     const [messages, setMessages] = useState([]);
+    const [isPolling, setIsPolling] = useState(true);
 
     const downloadData = async () => {
         setLoadingText("다운로드 완료");
-        setMessages([]);
+        setIsPolling(false);
 
         const filename = `${params.id}.zip`;
-        navigate("/list");
         try {
             // 파일 다운로드 (GET 요청)
             const response = await fetch('/api/download/' + filename, {
@@ -51,6 +51,9 @@ const LoadingPage = () => {
 
         }
 
+        navigate("/list");
+
+
     };
 
     // 일정 간격마다 진행 상황을 요청하는 함수
@@ -67,15 +70,19 @@ const LoadingPage = () => {
     useEffect(() => {
         fetch("/api/download_signal/" + params.id)
             .then(response => response.json())
-            .then(() => downloadData())
+            .then(() => {
+                downloadData();
+            })
             .catch(error => console.error("Error fetching data:", error));
     }, [params.id]);
 
     // 컴포넌트가 마운트될 때 폴링 시작
     useEffect(() => {
-        const interval = setInterval(pollProgress, 1000); // Call pollProgress every 5 seconds
-        return () => clearInterval(interval); // Cleanup interval on component unmount
-    }, []);
+        if (isPolling) {
+            const interval = setInterval(pollProgress, 1000); // Call pollProgress every 5 seconds
+            return () => clearInterval(interval); // Cleanup interval on component unmount
+        }
+    }, [isPolling]);
 
     useEffect(() => {
         // 로딩 텍스트 애니메이션 (500ms마다 점 추가)

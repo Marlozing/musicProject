@@ -91,8 +91,10 @@ def handle_signal(filename):
 
     try:
         run_async_task(DownloadAudio(progress_list).download_audio(filename))
+        progress_list.clear()  # 다운로드 후 progress_list 초기화
 
     except Exception as e:
+        print(e)
         return jsonify({"error": str(e)}), 500
 
     return jsonify({"message": "Downloaded successfully"}), 200
