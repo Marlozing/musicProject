@@ -16,7 +16,6 @@ from tempfile import TemporaryDirectory
 from bs4 import BeautifulSoup as bs
 from pytubefix import YouTube
 from dotenv import load_dotenv
-from flask_socketio import emit
 
 from .FindStartTime import find_time
 
@@ -134,33 +133,61 @@ async def get_html(article_id: str):
 # endregion
 
 
+# region 시간 포맷팅
+def format_time(seconds: float) -> str:
+    """초 단위의 시간을 HH:MM:SS.ms 형태로 변환합니다."""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = seconds % 60
+    return f"{hours:02d}:{minutes:02d}:{secs:05.2f}"
+
+
+# endregion
+
+
 class DownloadAudio:
     # region 초기 설정
-    def __init__(self, socketio):
+    def __init__(self, progress_list: list):
         load_dotenv("crawl.env")
-
-        self.socketio = socketio
 
         # 임시 폴더 생성
         with TemporaryDirectory() as temp_dir:
             self.temp_dir = temp_dir
-            self.raw_dir = os.path.join(temp_dir, "raw")
-            self.compiled_dir = os.path.join(temp_dir, "compiled")
+            self.raw_dir = os.path.join(self.temp_dir, "raw")
+            self.compiled_dir = os.path.join(self.temp_dir, "compiled")
 
-            os.mkdir(self.raw_dir)
-            os.mkdir(self.compiled_dir)
+        os.mkdir(self.raw_dir)
+        os.mkdir(os.path.join(self.raw_dir, "audio"))
+        os.mkdir(self.compiled_dir)
 
         self.youtubes_dict = {}
         self.origin_audio = None
         self.download_path = "./video"
         self.music_title = "음악"
+        self.progress_list = progress_list
 
     # endregion
 
     # region 진행 상황 출력
-    async def print_progress(self, message: str):
-        self.socketio.emit("progress_update", {"message": message})
-        self.socketio.sleep(0)
+    async def write_progress(self, message: str):
+        self.progress_list.append(message)
+        print(message)
+
+    # endregion
+
+    # region ffmpeg 변환
+    async def ffmpeg_convert_file(self, command: list):
+        try:
+            conv_result = await asyncio.to_thread(
+                subprocess.run, command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            if conv_result.returncode != 0:
+                err_msg = conv_result.stderr.decode(errors="replace")
+                await self.write_progress(f"FFMPEG error for {command}: {err_msg}")
+                return
+        except Exception as e:
+            await self.write_progress(f"FFMPEG exception for {command}: {e}")
+            return
 
     # endregion
 
@@ -169,45 +196,79 @@ class DownloadAudio:
         if output_path is None:
             output_path = self.raw_dir
 
-        yt = self.youtubes_dict[title]
+        yt = self.youtubes_dict.get(title)
         video_stream = yt.streams.filter(
             resolution="1080p", file_extension="mp4"
         ).first()
         audio_stream = yt.streams.filter(only_audio=True, file_extension="mp4").first()
 
-        try:
-            video_stream.download(output_path=output_path, filename=f"{title}.mp4")
-            audio_stream.download(output_path=output_path, filename=f"{title}.wav")
-
-            await self.print_progress(f"Downloaded {title}")
-        except Exception as e:
-            print(f"Error: {title}")
-            print(e)
+        if video_stream is None or audio_stream is None:
+            await self.write_progress(
+                f"Error: '{title}'에 대해 적절한 스트림을 찾지 못했습니다."
+            )
             return
+
+        print(f"Downloading audio from {title}...")
+
+        try:
+            # 비디오와 오디오 다운로드를 동시에 실행 (blocking 함수를 별도 스레드로 실행)
+            download_tasks = [
+                asyncio.to_thread(
+                    video_stream.download,
+                    output_path=output_path,
+                    filename=f"{title}.mp4",
+                ),
+                asyncio.to_thread(
+                    audio_stream.download,
+                    output_path=os.path.join(output_path, "audio"),
+                    filename=f"{title}.mp4",
+                ),
+            ]
+            await asyncio.gather(*download_tasks)
+        except Exception as e:
+            await self.write_progress(f"Download error for {title}: {e}")
+            print(f"Download error for {title}: {e}")
+            return
+
+        print(f"Download complete for {title}...")
+
+        ffmpeg_conv_command = [
+            "ffmpeg",
+            "-y",  # 덮어쓰기 옵션
+            "-i",
+            f"{output_path}/audio/{title}.mp4",  # 원본 오디오 파일 (mp4 컨테이너 내 오디오 스트림)
+            "-ar",
+            "44100",  # 샘플레이트 조정 (필요 시 변경)
+            f"{output_path}/{title}.wav",  # 출력 WAV 파일
+        ]
+
+        await self.ffmpeg_convert_file(ffmpeg_conv_command)
+        await self.write_progress(f"Downloaded {title}")
 
     # endregion
 
     # region 동영상 파일 시간 조정
     async def adjust_audio_start_time(self, title: str):
-        audio, _ = await asyncio.to_thread(
+        audio, sr = await asyncio.to_thread(
             librosa.load, f"{self.raw_dir}/{title}.wav", sr=None, mono=False
         )
 
         start_index = await find_time(self.origin_audio, audio[0]) * 512
-        start_time = start_index / 44100
+        start_time = start_index / sr
 
         await asyncio.to_thread(
             soundfile.write,
             f"{self.compiled_dir}/{title}.wav",
             audio[:, start_index:].T,
-            44100,
+            sr,
         )
 
-        command = [
+        formateed_time = format_time(start_time)
+        ffmpeg_merge_command = [
             "ffmpeg",
             "-y",
             "-ss",
-            f"00:00:{start_time}",  # 시작 시간
+            formateed_time,  # 시작 시간
             "-i",
             f"{self.raw_dir}/{title}.mp4",  # 입력 비디오 파일
             "-c",
@@ -215,36 +276,41 @@ class DownloadAudio:
             f"{self.compiled_dir}/{title}.mp4",  # 출력 비디오 파일
         ]
 
-        await asyncio.to_thread(
-            subprocess.run, command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        result = await asyncio.to_thread(
+            subprocess.run,
+            ffmpeg_merge_command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
 
-        await self.print_progress(f"Adjusted {title}")
+        if result.returncode != 0:
+            err_msg = result.stderr.decode(errors="replace")
+            await self.write_progress(f"Error adjusting {title}: {err_msg}")
+        else:
+            await self.write_progress(f"Adjusted {title}")
 
     # endregion
 
     # region 오디오 병합
     async def merge_audio(self, title: str):
-        command = [
+        ffmpeg_merge_command = [
             "ffmpeg",
+            "-y",  # 덮어쓰기 옵션일
             "-i",
-            f"{self.compiled_dir}/{title}.mp4",
+            f"{self.compiled_dir}/{title}.mp4",  # 비디오 파
             "-i",
-            f"{self.compiled_dir}/{title}.wav",
+            f"{self.compiled_dir}/{title}.wav",  # WAV 오디오 파일
             "-c:v",
-            "copy",
-            "-c:a",
-            "aac",
-            "-strict",
-            "experimental",
-            f"{self.temp_dir}/{title}.mp4",
+            "copy",  # 비디오 스트림은 재인코딩 없이 그대로 복사
+            "-map",
+            "0:v:0",  # 첫 번째 입력의 비디오 스트림 선택
+            "-map",
+            "1:a:0",  # 두 번째 입력의 오디오 스트림 선택
+            f"{self.temp_dir}/{title}.mkv",
         ]
 
-        await asyncio.to_thread(
-            subprocess.run, command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-
-        await self.print_progress(f"Merged {title}")
+        await self.ffmpeg_convert_file(ffmpeg_merge_command)
+        await self.write_progress(f"Merged {title}")
 
     # endregion
 
@@ -254,14 +320,14 @@ class DownloadAudio:
         with zipfile.ZipFile(zip_path, "w") as zipf:
             for entry in os.listdir(self.temp_dir):
                 entry_path = os.path.join(self.temp_dir, entry)
-                if os.path.isfile(entry_path) and entry_path.endswith(".mp4"):
+                if os.path.isfile(entry_path) and entry_path.endswith(".mkv"):
                     zipf.write(entry_path, arcname=entry)
 
         return zip_path
 
     # endregion
 
-    # region 오디오 다운로드 함수
+    # region 최종 다운로드 함수
     async def download_audio(self, url_id: str):
 
         # 유튜브 링크 가져오기
@@ -279,8 +345,7 @@ class DownloadAudio:
                 self.youtubes_dict[get_viewer(yt.author, yt.title)] = yt
 
             except Exception as e:
-                print(f"Error: {link}")
-                print(e)
+                print(f"Error: {link} : {e}")
                 pass
         # endregion
 
@@ -312,12 +377,14 @@ class DownloadAudio:
         for key in self.youtubes_dict.keys():
             await self.download_youtube(key)
 
+        print(f"Video downloaded for {url_id}")
+
         for key in self.youtubes_dict.keys():
             await self.adjust_audio_start_time(key)
             await self.merge_audio(key)
 
         await self.create_zip(output_path=self.download_path, zip_name=f"{url_id}.zip")
-
+        self.progress_list = []
         # endregion
 
     # endregion
