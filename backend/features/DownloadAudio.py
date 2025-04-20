@@ -156,9 +156,9 @@ class DownloadAudio:
             self.raw_dir = os.path.join(self.temp_dir, "raw")
             self.compiled_dir = os.path.join(self.temp_dir, "compiled")
 
-        os.mkdir(self.raw_dir)
-        os.mkdir(os.path.join(self.raw_dir, "audio"))
-        os.mkdir(self.compiled_dir)
+            os.mkdir(self.raw_dir)
+            os.mkdir(os.path.join(self.raw_dir, "audio"))
+            os.mkdir(self.compiled_dir)
 
         self.youtubes_dict = {}
         self.origin_audio = None
@@ -208,7 +208,7 @@ class DownloadAudio:
             )
             return
 
-        print(f"Downloading audio from {title}...")
+        print(f"Downloading {title}...")
 
         try:
             # 비디오와 오디오 다운로드를 동시에 실행 (blocking 함수를 별도 스레드로 실행)
@@ -227,10 +227,7 @@ class DownloadAudio:
             await asyncio.gather(*download_tasks)
         except Exception as e:
             await self.write_progress(f"Download error for {title}: {e}")
-            print(f"Download error for {title}: {e}")
             return
-
-        print(f"Download complete for {title}...")
 
         ffmpeg_conv_command = [
             "ffmpeg",
@@ -330,6 +327,7 @@ class DownloadAudio:
     # region 최종 다운로드 함수
     async def download_audio(self, url_id: str):
 
+        print("Downloading audio...")
         # 유튜브 링크 가져오기
         youtube_links = await get_html(url_id)
 
@@ -365,7 +363,6 @@ class DownloadAudio:
         await self.download_youtube(default_name, output_path=self.compiled_dir)
         await self.merge_audio(default_name)
         del self.youtubes_dict[default_name]
-
         # endregion
 
         # 원본 오디오 로드
@@ -377,14 +374,13 @@ class DownloadAudio:
         for key in self.youtubes_dict.keys():
             await self.download_youtube(key)
 
-        print(f"Video downloaded for {url_id}")
+        print(f"All video downloaded for {url_id}")
 
         for key in self.youtubes_dict.keys():
             await self.adjust_audio_start_time(key)
             await self.merge_audio(key)
 
         await self.create_zip(output_path=self.download_path, zip_name=f"{url_id}.zip")
-        self.progress_list = []
         # endregion
 
     # endregion
