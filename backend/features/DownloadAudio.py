@@ -6,9 +6,8 @@ import time
 import warnings
 import json
 import threading
-import librosa
 import numpy as np
-import soundfile
+import soundfile as sf
 import requests
 import zipfile
 
@@ -54,10 +53,10 @@ def get_viewer(author: str, title: str) -> str:
     authors = {
         "우왁굳의 반찬가게": "[우왁굳]",
         "데친 숙주나물": "[아이네]",
-        "징버거가 ZZANG센 주제에 너무 신중하다": "[징버거]",
+        "징버거가 짱이다": "[징버거]",
         "릴파의 순간들": "[릴파]",
-        "주르르": "[주르르]",
-        "고세구의 짧은거": "[고세구]",
+        "봉인 풀린 주르르": "[주르르]",
+        "고세구의 좀더": "[고세구]",
         "비챤의 나랑놀아": "[비챤]",
         "하치키타치": "[뢴트게늄]",
     }
@@ -236,6 +235,8 @@ class DownloadAudio:
             f"{output_path}/audio/{title}.mp4",  # 원본 오디오 파일 (mp4 컨테이너 내 오디오 스트림)
             "-ar",
             "44100",  # 샘플레이트 조정 (필요 시 변경)
+            "-ac", # 모노로 강제 변환
+            "1",
             f"{output_path}/{title}.wav",  # 출력 WAV 파일
         ]
 
@@ -247,7 +248,7 @@ class DownloadAudio:
     # region 동영상 파일 시간 조정
     async def adjust_audio_start_time(self, title: str):
         audio, sr = await asyncio.to_thread(
-            librosa.load, f"{self.raw_dir}/{title}.wav", sr=None, mono=False
+            sf.read, f"{self.raw_dir}/{title}.wav", dtype='float32'
         )
 
         start_index = await find_time(self.origin_audio, audio[0]) * 512
@@ -326,7 +327,6 @@ class DownloadAudio:
 
     # region 최종 다운로드 함수
     async def download_audio(self, url_id: str):
-
         print("Downloading audio...")
         # 유튜브 링크 가져오기
         youtube_links = await get_html(url_id)
@@ -362,17 +362,19 @@ class DownloadAudio:
         # region 원본 영상 처리
         await self.download_youtube(default_name, output_path=self.compiled_dir)
         await self.merge_audio(default_name)
-        del self.youtubes_dict[default_name]
+        # del self.youtubes_dict[default_name]
         # endregion
 
         # 원본 오디오 로드
-        self.origin_audio, _ = librosa.load(
-            f"{self.compiled_dir}/원본.wav", sr=None, mono=True
+        audio_data, sr = await asyncio.to_thread(
+            sf.read, f"{self.compiled_dir}/원본.wav", dtype='float32'
         )
+        # ffmpeg에서 이미 모노로 변환되었으므로 별도 변환 로직 불필요.
+        self.origin_audio = audio_data
 
         # region 다운로드 및 시간 조정
         for key in self.youtubes_dict.keys():
-            await self.download_youtube(key)
+            await self.download_youtube(key, output_path="./video")
 
         print(f"All video downloaded for {url_id}")
 

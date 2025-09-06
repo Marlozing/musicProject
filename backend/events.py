@@ -77,7 +77,7 @@ def delete_file(filename):
 @main.route("/refresh", methods=["GET"])
 def get_refresh():
     try:
-        run_async_task(CrawlService().check_new_posts(10))
+        run_async_task(CrawlService().crawl_until_known())
         return jsonify({"message": "Refreshed successfully"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500

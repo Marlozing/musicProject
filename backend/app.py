@@ -11,7 +11,7 @@ load_dotenv()
 app = Flask(__name__, static_folder="./build", template_folder="./build")
 app.config['SECRET_KEY'] = os.getenv("SECRECT_KEY")
 CORS(app)
-app.debug = False
+app.debug = True
 
 
 @app.route("/", defaults={"path": ""})
