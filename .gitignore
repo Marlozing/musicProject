@@ -4,3 +4,4 @@ backend/build/
 backend/video/
 __pycache__/
 *.pyc
+/.gemini/
