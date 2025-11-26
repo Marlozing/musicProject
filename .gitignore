@@ -5,3 +5,4 @@ backend/video/
 __pycache__/
 *.pyc
 /.gemini/
+GEMINI.md
