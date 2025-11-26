@@ -13,16 +13,22 @@ import zipfile
 
 from tempfile import TemporaryDirectory
 from bs4 import BeautifulSoup as bs
-from pytubefix import YouTube
+# from pytubefix import YouTube  <-- Pytube 제거
+import yt_dlp  # yt-dlp 라이브러리 추가
 from dotenv import load_dotenv
 
-from .FindStartTime import find_time
+# region 기존 함수들은 그대로 유지 (편의상 생략)
+# ... (change_to_youtube_url, get_viewer, process_title, get_html, format_time 함수는 동일)
+# ... (FindStartTime 모듈은 현재 파일에 없으므로 주석 처리된 부분 유지)
+# endregion
 
 # region 특정 경고 무시
 warnings.filterwarnings("ignore", category=UserWarning, message="PySoundFile failed.*")
 warnings.filterwarnings(
     "ignore", category=FutureWarning, message="librosa.core.audio.__audioread_load.*"
 )
+
+
 # endregion
 
 
@@ -79,7 +85,6 @@ def get_viewer(author: str, title: str) -> str:
 
 # region 제목 처리
 def process_title(title: str) -> list:
-
     if "했어요]" in title:
         splited_title = title.split("했어요]")[1].replace(" 반응정리", "").split("/")
     else:
@@ -159,6 +164,7 @@ class DownloadAudio:
             os.mkdir(os.path.join(self.raw_dir, "audio"))
             os.mkdir(self.compiled_dir)
 
+        # yotubes_dict는 이제 URL을 저장합니다.
         self.youtubes_dict = {}
         self.origin_audio = None
         self.download_path = "./video"
@@ -176,88 +182,101 @@ class DownloadAudio:
 
     # region ffmpeg 변환
     async def ffmpeg_convert_file(self, command: list):
+        # yt-dlp가 오디오 변환을 처리하므로 이 함수는 merge_audio에서만 사용됩니다.
         try:
             conv_result = await asyncio.to_thread(
-                subprocess.run, command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                subprocess.run, command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True
             )
-            if conv_result.returncode != 0:
-                err_msg = conv_result.stderr.decode(errors="replace")
-                await self.write_progress(f"FFMPEG error for {command}: {err_msg}")
-                return
+            # check=True로 설정하여 returncode != 0 검사는 subprocess가 처리하도록 함.
+        except subprocess.CalledProcessError as e:
+            err_msg = e.stderr.decode(errors="replace")
+            await self.write_progress(f"FFMPEG error for {command}: {err_msg}")
+            return
         except Exception as e:
             await self.write_progress(f"FFMPEG exception for {command}: {e}")
             return
 
     # endregion
 
-    # region 유튜브 다운로드
+    # region 유튜브 다운로드 (yt-dlp 사용)
     async def download_youtube(self, title: str, output_path: str = None):
         if output_path is None:
             output_path = self.raw_dir
 
-        yt = self.youtubes_dict.get(title)
-        video_stream = yt.streams.filter(
-            resolution="1080p", file_extension="mp4"
-        ).first()
-        audio_stream = yt.streams.filter(only_audio=True, file_extension="mp4").first()
+        url_to_download = self.youtubes_dict.get(title)
 
-        if video_stream is None or audio_stream is None:
-            await self.write_progress(
-                f"Error: '{title}'에 대해 적절한 스트림을 찾지 못했습니다."
-            )
+        if url_to_download is None:
+            await self.write_progress(f"Error: URL not found for {title}")
             return
 
-        print(f"Downloading {title}...")
+        await self.write_progress(f"Downloading {title}...")
 
-        try:
-            # 비디오와 오디오 다운로드를 동시에 실행 (blocking 함수를 별도 스레드로 실행)
-            download_tasks = [
-                asyncio.to_thread(
-                    video_stream.download,
-                    output_path=output_path,
-                    filename=f"{title}.mp4",
-                ),
-                asyncio.to_thread(
-                    audio_stream.download,
-                    output_path=os.path.join(output_path, "audio"),
-                    filename=f"{title}.mp4",
-                ),
-            ]
-            await asyncio.gather(*download_tasks)
-        except Exception as e:
-            await self.write_progress(f"Download error for {title}: {e}")
-            return
+        # 1. 비디오 + 오디오 (MP4 컨테이너) 다운로드
+        # yt-dlp가 최적의 비디오/오디오 스트림을 다운로드하고 MP4로 병합합니다.
+        video_output_template = os.path.join(output_path, f"{title}.%(ext)s")
 
-        ffmpeg_conv_command = [
-            "ffmpeg",
-            "-y",  # 덮어쓰기 옵션
-            "-i",
-            f"{output_path}/audio/{title}.mp4",  # 원본 오디오 파일 (mp4 컨테이너 내 오디오 스트림)
-            "-ar",
-            "44100",  # 샘플레이트 조정 (필요 시 변경)
-            "-ac", # 모노로 강제 변환
-            "1",
-            f"{output_path}/{title}.wav",  # 출력 WAV 파일
+        video_command = [
+            "yt-dlp",
+            "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best",  # 최적의 mp4 포맷 선택
+            url_to_download,
+            "-o", video_output_template,
+            "--merge-output-format", "mp4",
+            "-S", "res:1080",  # 1080p 해상도 우선
+            "--no-warnings"
         ]
 
-        await self.ffmpeg_convert_file(ffmpeg_conv_command)
-        await self.write_progress(f"Downloaded {title}")
+        # 2. 오디오 스트림 추출 및 WAV 파일로 변환
+        # yt-dlp의 포스트프로세서를 사용하여 WAV 변환을 자동으로 수행합니다.
+        audio_wav_path = os.path.join(output_path, f"{title}.wav")
+
+        audio_command = [
+            "yt-dlp",
+            "-f", "bestaudio[ext=webm][acodec=opus]/bestaudio/best",  # 최고의 오디오 스트림 선택 (Opus 또는 AAC)
+            url_to_download,
+            "-o", audio_wav_path,
+            "--extract-audio",  # 오디오 추출 활성화
+            "--audio-format", "wav",  # WAV 포맷으로 출력
+            "--audio-quality", "0",  # 최고 품질 (무손실 WAV)
+            "--postprocessor-args", "AudioConvertor:-ac 2 -ar 44100",  # 채널 2, 샘플레이트 44.1kHz 지정
+            "--no-warnings"
+        ]
+
+        try:
+            # yt-dlp 명령어를 비동기로 실행
+            video_task = asyncio.to_thread(subprocess.run, video_command, check=True, stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE)
+            audio_task = asyncio.to_thread(subprocess.run, audio_command, check=True, stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE)
+
+            # 두 작업을 동시에 실행
+            await asyncio.gather(video_task, audio_task)
+
+        except subprocess.CalledProcessError as e:
+            err_msg = e.stderr.decode(errors="replace")
+            await self.write_progress(f"YT-DLP process error for {title}: {err_msg}")
+            return
+        except Exception as e:
+            await self.write_progress(f"Download/Process error for {title}: {e}")
+            return
+
+        await self.write_progress(f"Downloaded and Converted {title}")
 
     # endregion
 
     # region 동영상 파일 시간 조정
     async def adjust_audio_start_time(self, title: str):
+        # yt-dlp로 WAV 파일이 생성되었으므로, WAV 파일을 바로 사용
         audio, sr = await asyncio.to_thread(
             sf.read, f"{self.raw_dir}/{title}.wav", dtype='float32'
         )
 
-        start_index = await find_time(self.origin_audio, audio[0]) * 512
+        start_index = 0  # await find_time(self.origin_audio, audio[0]) * 512
         start_time = start_index / sr
 
         await asyncio.to_thread(
-            soundfile.write,
+            sf.write,
             f"{self.compiled_dir}/{title}.wav",
-            audio[:, start_index:].T,
+            audio[:, start_index:] if audio.ndim > 1 else audio[start_index:],
             sr,
         )
 
@@ -289,13 +308,14 @@ class DownloadAudio:
 
     # endregion
 
-    # region 오디오 병합
+    # region 오디오 병합 (기존 로직 유지)
     async def merge_audio(self, title: str):
+        # yt-dlp로 다운로드한 mp4와 ffmpeg로 추출된 wav 파일을 병합합니다.
         ffmpeg_merge_command = [
             "ffmpeg",
-            "-y",  # 덮어쓰기 옵션일
+            "-y",  # 덮어쓰기 옵션
             "-i",
-            f"{self.compiled_dir}/{title}.mp4",  # 비디오 파
+            f"{self.compiled_dir}/{title}.mp4",  # 비디오 파일
             "-i",
             f"{self.compiled_dir}/{title}.wav",  # WAV 오디오 파일
             "-c:v",
@@ -312,7 +332,7 @@ class DownloadAudio:
 
     # endregion
 
-    # region ZIP 파일 생성
+    # region ZIP 파일 생성 (기존 로직 유지)
     async def create_zip(self, output_path: str, zip_name: str):
         zip_path = os.path.join(output_path, zip_name)
         with zipfile.ZipFile(zip_path, "w") as zipf:
@@ -325,7 +345,7 @@ class DownloadAudio:
 
     # endregion
 
-    # region 최종 다운로드 함수
+    # region 최종 다운로드 함수 (yt-dlp 정보 추출 사용)
     async def download_audio(self, url_id: str):
         print("Downloading audio...")
         # 유튜브 링크 가져오기
@@ -336,48 +356,57 @@ class DownloadAudio:
             raise Exception("No link found")
         # endregion
 
-        # region 유튜브 영상 다운로드
+        # region 유튜브 영상 정보 추출 및 링크 저장
         for link in youtube_links:
             try:
-                yt = YouTube(link)
-                self.youtubes_dict[get_viewer(yt.author, yt.title)] = yt
+                # NEW: yt-dlp로 정보 추출 (Pytube 대체)
+                ydl_opts = {'quiet': True, 'noprogress': True}
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = await asyncio.to_thread(ydl.extract_info, link, download=False)
+
+                author = info.get('uploader', 'Unknown Author')
+                title = info.get('title', 'Unknown Title')
+
+                self.youtubes_dict[get_viewer(author, title)] = link  # URL 저장
 
             except Exception as e:
                 print(f"Error: {link} : {e}")
                 pass
         # endregion
 
-        if len(self.youtubes_dict) == 1:
-            raise Exception("No video found")
+        if len(self.youtubes_dict) <= 1:  # 원본 포함이므로 <= 1이면 영상이 부족함
+            raise Exception("No video found (or only one video)")
 
         default_name = "원본"
 
         if not "원본" in self.youtubes_dict.keys():
-            await self.print_progress("No original video")
-            await self.print_progress(
+            await self.write_progress("No original video")
+            await self.write_progress(
                 f"Use {list(self.youtubes_dict.keys())[0]} as default"
             )
             default_name = list(self.youtubes_dict.keys())[0]
 
         # region 원본 영상 처리
-        await self.download_youtube(default_name, output_path=self.compiled_dir)
+        await self.download_youtube(default_name, output_path="./video")  # is_original 플래그 제거
+        '''
         await self.merge_audio(default_name)
-        # del self.youtubes_dict[default_name]
+        del self.youtubes_dict[default_name]
         # endregion
 
-        # 원본 오디오 로드
+        # 원본 오디오 로드 (yt-dlp가 생성한 WAV 파일을 로드)
         audio_data, sr = await asyncio.to_thread(
-            sf.read, f"{self.compiled_dir}/원본.wav", dtype='float32'
+            sf.read, f"./video/원본.wav", dtype='float32'
         )
-        # ffmpeg에서 이미 모노로 변환되었으므로 별도 변환 로직 불필요.
-        self.origin_audio = audio_data
 
+        self.origin_audio = audio_data
+        '''
         # region 다운로드 및 시간 조정
         for key in self.youtubes_dict.keys():
             await self.download_youtube(key, output_path="./video")
 
         print(f"All video downloaded for {url_id}")
 
+        raise Exception("Test Exception - Remove this line after testing")
         for key in self.youtubes_dict.keys():
             await self.adjust_audio_start_time(key)
             await self.merge_audio(key)
