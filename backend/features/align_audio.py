@@ -2,6 +2,7 @@ import numpy as np
 import scipy.io.wavfile as wav
 from scipy import signal
 import os
+from numba import jit  # Numba 임포트
 
 
 # region 정규화 및 보조 함수
@@ -9,6 +10,7 @@ import os
 # 크거나 같은 2의 제곱수 계산 함수
 def next_pow2(n):
     return 1 << (int(n - 1).bit_length())
+
 
 # 오디오 정규화 함수
 def robust_normalize(data):
@@ -22,6 +24,7 @@ def robust_normalize(data):
     max_val = np.max(np.abs(data))
     if max_val > 1e-5: data = data / max_val
     return data
+
 
 # endregion
 
@@ -60,6 +63,7 @@ def calculate_gcc_phat(x, y):
 
     lag_samples = (k + delta) - (len(cc_lin) - 1) / 2.0
     return int(round(lag_samples))
+
 
 # endregion
 
@@ -102,12 +106,12 @@ def refine_lag_robust(ref, mic, initial_lag, search_range=200, keep_ratio=0.7):
 
     return best_lag
 
+
 # endregion
 
 # region 오디오 정렬 함수
 
 def align_ref_to_mic_canvas(ref, mic_len, lag):
-    """Mic 길이와 동일한 빈 캔버스에 Ref를 지연 시간에 맞춰 배치합니다."""
     ref_aligned = np.zeros(mic_len, dtype=np.float32)
     n_ref = len(ref)
 
@@ -126,13 +130,14 @@ def align_ref_to_mic_canvas(ref, mic_len, lag):
 
     return ref_aligned
 
+
 # endregion
 
 # endregion
 
 # region 제거 관련 함수들
 
-# region 배경은 제거 함수
+# region 배경음 제거 함수
 
 def wiener_filter_soft(ref, mic, smoothness=0.9):
     # 고해상도 설정
@@ -157,14 +162,52 @@ def wiener_filter_soft(ref, mic, smoothness=0.9):
 
     return clean_audio
 
+
 # endregion
 
 # region 후처리 함수
 
+# region 파이썬 -> 기계어 함수
+
+@jit(nopython=True, cache=True)
+def _calculate_gain_curve_jit(abs_audio, threshold_linear, ratio, gain_decay, env_decay):
+    n_samples = len(abs_audio)
+    gain_curve = np.zeros(n_samples, dtype=np.float32)
+    current_env = 0.0
+    current_gain = 1.0
+
+    for i in range(n_samples):
+        # 엔벨로프 추적 (빠른 반응)
+        val = abs_audio[i]
+        if val > current_env:
+            current_env = val
+        else:
+            current_env = current_env * env_decay + val * (1.0 - env_decay)
+
+        # 목표 게인 설정
+        if current_env > threshold_linear:
+            target_gain = 1.0
+        else:
+            target_gain = ratio
+
+        # 게인 적용 (Attack은 즉시, Release는 천천히)
+        if target_gain > current_gain:
+            current_gain = target_gain  # Attack
+        else:
+            current_gain = current_gain * gain_decay  # Release
+            if current_gain < ratio: current_gain = ratio
+
+        gain_curve[i] = current_gain
+
+    return gain_curve
+
+# endregion
+
 def apply_soft_expander(audio, threshold_db=-45.0, ratio=0.2, release_ms=400, fs=48000):
     threshold_linear = 10 ** (threshold_db / 20)
-    n_samples = len(audio)
-    abs_audio = np.abs(audio)
+
+    # Numba 처리를 위해 float32 타입 보장
+    abs_audio = np.abs(audio).astype(np.float32)
 
     # 감쇠 계수 계산 (문 닫는 속도)
     if release_ms > 0:
@@ -176,37 +219,15 @@ def apply_soft_expander(audio, threshold_db=-45.0, ratio=0.2, release_ms=400, fs
     # 엔벨로프 추적용 감쇠 계수 (센서 반응 속도 - 10ms 고정)
     env_decay = np.exp(-1.0 / (fs * 0.01))
 
-    gain_curve = np.zeros(n_samples)
-    current_env = 0.0
-    current_gain = 1.0
+    # [변경] 분리된 Numba JIT 함수 호출 (속도 가속 구간)
+    gain_curve = _calculate_gain_curve_jit(abs_audio, threshold_linear, ratio, gain_decay, env_decay)
 
-    for i in range(n_samples):
-        # 엔벨로프 추적 (빠른 반응)
-        if abs_audio[i] > current_env:
-            current_env = abs_audio[i]
-        else:
-            current_env = current_env * env_decay + abs_audio[i] * (1 - env_decay)
-
-        # 목표 게인 설정
-        if current_env > threshold_linear:
-            target_gain = 1.0
-        else:
-            target_gain = ratio
-
-            # 게인 적용 (Attack은 즉시, Release는 천천히)
-        if target_gain > current_gain:
-            current_gain = target_gain  # Attack
-        else:
-            current_gain = current_gain * gain_decay  # Release
-            if current_gain < ratio: current_gain = ratio
-
-        gain_curve[i] = current_gain
-
-    # 팝 노이즈 방지용 추가 스무딩
+    # 팝 노이즈 방지용 추가 스무딩 (Numpy Convolve는 이미 빠르므로 유지)
     kernel_size = 500
     gain_curve_smooth = np.convolve(gain_curve, np.ones(kernel_size) / kernel_size, mode='same')
 
     return audio * gain_curve_smooth
+
 
 # endregion
 
@@ -286,8 +307,9 @@ def align_audio(ref_path, mic_path, out_path):
         elif len(cleaned_ch) < len(mic_ch):
             cleaned_ch = np.pad(cleaned_ch, (0, len(mic_ch) - len(cleaned_ch)), 'constant')
 
-        # 후처리 (소프트 익스팬더)
+        # 후처리 (소프트 익스팬더) - Numba 적용으로 가속됨
         final_ch = apply_soft_expander(cleaned_ch, threshold_db=-45.0, ratio=0.2, release_ms=400, fs=fs)
+
         processed_channels.append(final_ch)
 
     # 채널 병합
@@ -299,10 +321,17 @@ def align_audio(ref_path, mic_path, out_path):
     # 5. 저장
     wav.write(out_path, fs, np.int16(final_audio * 32767))
 
+
 # endregion
 
 if __name__ == "__main__":
+    import time
+
+    name = "비챤"
+    start_time = time.time()
+
     try:
-        align_audio("../video/원본.wav", "../video/[비챤].wav", "../video/align_[비챤].wav")
+        align_audio("../video/원본.wav", f"../video/[{name}].wav", f"../video/align_[{name}2].wav")
+        print(f"오디오 처리 완료 in {time.time() - start_time:.2f} seconds.")
     except Exception as e:
         raise RuntimeError(f"오디오 처리 중 치명적인 오류 발생: {e}")
