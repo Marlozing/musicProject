@@ -139,10 +139,10 @@ def align_ref_to_mic_canvas(ref, mic_len, lag):
 
 # region 배경음 제거 함수
 
-def wiener_filter_soft(ref, mic, smoothness=0.9):
+def wiener_filter_soft(ref, mic, smoothness=0.5): #0.9):
     # 고해상도 설정
     N_FFT = 4096
-    HOP_LENGTH = 128
+    HOP_LENGTH = 512 #128
 
     f, t, Z_ref = signal.stft(ref, nperseg=N_FFT, noverlap=N_FFT - HOP_LENGTH)
     _, _, Z_mic = signal.stft(mic, nperseg=N_FFT, noverlap=N_FFT - HOP_LENGTH)
@@ -150,12 +150,25 @@ def wiener_filter_soft(ref, mic, smoothness=0.9):
     P_ref = np.abs(Z_ref) ** 2
     P_mic = np.abs(Z_mic) ** 2 + 1e-12
 
+    alpha = 0.5
+    beta = 0.2
+
+    subtracted_power = P_mic - (alpha * P_ref)
+
+    floor = P_mic * beta
+    P_estimated = np.maximum(subtracted_power, floor)
+
+    mask = P_estimated / P_mic
+    mask = np.sqrt(mask)
+    '''
     # 소프트 마스킹 로직
     subtracted_power = P_mic - (smoothness * P_ref)
     subtracted_power = np.maximum(subtracted_power, 0)
 
     mask = subtracted_power / P_mic
     mask = np.power(mask, 0.5)  # 마스크 스무딩
+    '''
+
 
     Z_clean = Z_mic * mask
     _, clean_audio = signal.istft(Z_clean, nperseg=N_FFT, noverlap=N_FFT - HOP_LENGTH)
@@ -273,7 +286,6 @@ def align_audio(ref_path, mic_path, out_path):
     gcc_lag = calculate_gcc_phat(mic_mono, ref_mono)
     # 이상치 제거를 통한 정밀 보정 (모노 기준)
     best_lag = refine_lag_robust(ref_mono, mic_mono, initial_lag=gcc_lag, search_range=200)
-
     # 3. 분리 및 후처리 (채널별 처리)
     # 입력이 스테레오인 경우 채널별로 분리하여 처리
     if mic_full.ndim == 1:
