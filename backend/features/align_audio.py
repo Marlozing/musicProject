@@ -139,7 +139,7 @@ def align_ref_to_mic_canvas(ref, mic_len, lag):
 
 # region 배경음 제거 함수
 
-def wiener_filter_soft(ref, mic, smoothness=0.5): #0.9):
+def wiener_filter_soft(ref, mic, alpha, beta):
     # 고해상도 설정
     N_FFT = 4096
     HOP_LENGTH = 512 #128
@@ -150,9 +150,6 @@ def wiener_filter_soft(ref, mic, smoothness=0.5): #0.9):
     P_ref = np.abs(Z_ref) ** 2
     P_mic = np.abs(Z_mic) ** 2 + 1e-12
 
-    alpha = 0.5
-    beta = 0.2
-
     subtracted_power = P_mic - (alpha * P_ref)
 
     floor = P_mic * beta
@@ -160,15 +157,6 @@ def wiener_filter_soft(ref, mic, smoothness=0.5): #0.9):
 
     mask = P_estimated / P_mic
     mask = np.sqrt(mask)
-    '''
-    # 소프트 마스킹 로직
-    subtracted_power = P_mic - (smoothness * P_ref)
-    subtracted_power = np.maximum(subtracted_power, 0)
-
-    mask = subtracted_power / P_mic
-    mask = np.power(mask, 0.5)  # 마스크 스무딩
-    '''
-
 
     Z_clean = Z_mic * mask
     _, clean_audio = signal.istft(Z_clean, nperseg=N_FFT, noverlap=N_FFT - HOP_LENGTH)
@@ -248,7 +236,7 @@ def apply_soft_expander(audio, threshold_db=-45.0, ratio=0.2, release_ms=400, fs
 
 # region 메인 함수
 
-def align_audio(ref_path, mic_path, out_path):
+def align_audio(ref_path, mic_path, out_path, alpha=0.5, beta=0.2):
     if not os.path.exists(ref_path):
         raise FileNotFoundError(f"원본 파일을 찾을 수 없습니다: {ref_path}")
     if not os.path.exists(mic_path):
@@ -311,7 +299,7 @@ def align_audio(ref_path, mic_path, out_path):
         ref_aligned = align_ref_to_mic_canvas(ref_ch, len(mic_ch), best_lag)
 
         # 고음질 위너 필터 적용
-        cleaned_ch = wiener_filter_soft(ref_aligned, mic_ch, smoothness=0.9)
+        cleaned_ch = wiener_filter_soft(ref_aligned, mic_ch, alpha=alpha, beta=beta)
 
         # ISTFT 후 길이 보정
         if len(cleaned_ch) > len(mic_ch):
@@ -340,10 +328,14 @@ if __name__ == "__main__":
     import time
 
     name = "비챤"
+    alpha = 0.5
+    beta = 0.2
+
     start_time = time.time()
 
+
     try:
-        align_audio("../video/원본.wav", f"../video/[{name}].wav", f"../video/align_[{name}2].wav")
+        align_audio("../video/원본.wav", f"../video/[{name}].wav", f"../video/align_[{name}2].wav", alpha=alpha, beta=beta)
         print(f"오디오 처리 완료 in {time.time() - start_time:.2f} seconds.")
     except Exception as e:
         raise RuntimeError(f"오디오 처리 중 치명적인 오류 발생: {e}")
