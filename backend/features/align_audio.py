@@ -3,139 +3,7 @@ import scipy.io.wavfile as wav
 from scipy import signal
 import os
 from numba import jit  # Numba 임포트
-
-
-# region 정규화 및 보조 함수
-
-# 크거나 같은 2의 제곱수 계산 함수
-def next_pow2(n):
-    return 1 << (int(n - 1).bit_length())
-
-
-# 오디오 정규화 함수
-def robust_normalize(data):
-    if data.dtype == np.int16:
-        data = data.astype(np.float32) / 32768.0
-    elif data.dtype == np.int32:
-        data = data.astype(np.float32) / 2147483648.0
-    else:
-        data = data.astype(np.float32)
-
-    max_val = np.max(np.abs(data))
-    if max_val > 1e-5: data = data / max_val
-    return data
-
-
-# endregion
-
-# region 정렬 관련 함수들
-
-# region gcc-phat 함수
-
-def calculate_gcc_phat(x, y):
-    # FFT 크기 계산
-    n = len(x) + len(y) - 1
-    n_fft = next_pow2(n)
-
-    # FFT 수행
-    X = np.fft.rfft(x, n=n_fft)
-    Y = np.fft.rfft(y, n=n_fft)
-
-    # PHAT 가중치를 적용한 상호 전력 스펙트럼
-    G = X * np.conj(Y)
-    R = G / (np.abs(G) + 1e-12)
-
-    # 역 FFT로 상호 상관 함수 계산
-    cc = np.fft.irfft(R, n=n_fft)
-
-    # 지연이 0인 지점을 중심으로 재정렬
-    half = n_fft // 2
-    cc_lin = np.concatenate((cc[-half:], cc[:half + 1]))
-    k = int(np.argmax(cc_lin))
-
-    # 서브 샘플 보간 (정밀도 향상)
-    delta = 0.0
-    if 0 < k < len(cc_lin) - 1:
-        y1, y2, y3 = cc_lin[k - 1], cc_lin[k], cc_lin[k + 1]
-        d = (y1 - 2 * y2 + y3)
-        delta = 0.0 if abs(d) < 1e-20 else 0.5 * (y1 - y3) / d
-        delta = float(np.clip(delta, -0.5, 0.5))
-
-    lag_samples = (k + delta) - (len(cc_lin) - 1) / 2.0
-    return int(round(lag_samples))
-
-
-# endregion
-
-# region 정밀 지연 보정 함수
-
-def refine_lag_robust(ref, mic, initial_lag, search_range=200, keep_ratio=0.7):
-    n_ref = len(ref)
-    center = initial_lag
-    lags = range(center - search_range, center + search_range + 1)
-
-    # 효율적인 뷰 생성을 위한 선행 패딩
-    pad_size = abs(center) + search_range + 1000
-    mic_padded = np.pad(mic, (pad_size, pad_size), 'constant')
-
-    # 속도 최적화를 위해 앞부분 30초만 비교
-    compare_len = min(n_ref, 16000 * 30)
-    ref_comp = ref[:compare_len]
-    k = int(compare_len * keep_ratio)  # 하위 70% 인덱스
-
-    best_lag = center
-    min_error = float('inf')
-
-    for lag in lags:
-        start = pad_size + lag
-        end = start + compare_len
-        mic_view = mic_padded[start:end]
-
-        if len(mic_view) < compare_len: continue
-
-        # L1 오차 계산
-        diff = np.abs(mic_view - ref_comp)
-
-        # 하위 70% 오차만 합산 (목소리 제외)
-        partitioned = np.partition(diff, k)
-        err = np.sum(partitioned[:k])
-
-        if err < min_error:
-            min_error = err
-            best_lag = lag
-
-    return best_lag
-
-
-# endregion
-
-# region 오디오 정렬 함수
-
-def align_ref_to_mic_canvas(ref, mic_len, lag):
-    ref_aligned = np.zeros(mic_len, dtype=np.float32)
-    n_ref = len(ref)
-
-    start_idx = lag
-
-    # 복사 범위 계산
-    r_start = max(0, -start_idx)
-    r_end = min(n_ref, mic_len - start_idx)
-    m_start = max(0, start_idx)
-    m_end = min(mic_len, start_idx + n_ref)
-
-    copy_len = min(r_end - r_start, m_end - m_start)
-
-    if copy_len > 0:
-        ref_aligned[m_start: m_start + copy_len] = ref[r_start: r_start + copy_len]
-
-    return ref_aligned
-
-
-# endregion
-
-# endregion
-
-# region 제거 관련 함수들
+from audio_utils import robust_normalize, calculate_gcc_phat, refine_lag_robust, align_ref_to_mic_canvas
 
 # region 배경음 제거 함수
 
@@ -274,6 +142,7 @@ def align_audio(ref_path, mic_path, out_path, alpha=0.5, beta=0.2):
     gcc_lag = calculate_gcc_phat(mic_mono, ref_mono)
     # 이상치 제거를 통한 정밀 보정 (모노 기준)
     best_lag = refine_lag_robust(ref_mono, mic_mono, initial_lag=gcc_lag, search_range=200)
+
     # 3. 분리 및 후처리 (채널별 처리)
     # 입력이 스테레오인 경우 채널별로 분리하여 처리
     if mic_full.ndim == 1:
